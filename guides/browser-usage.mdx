@@ -1,0 +1,201 @@
+---
+title: "Use the Kraken API SDK in Browser and Frontend Projects"
+sidebarTitle: "Browser Usage"
+description: "Bundle @siebly/kraken-api for browser environments using webpack. The SDK uses the Web Crypto API for HMAC signing, making it compatible with modern browsers."
+---
+
+The `@siebly/kraken-api` SDK is not limited to Node.js. It is designed to work in modern browser environments as well, making it suitable for frontend dashboards, price widgets, and other client-side applications that need to consume Kraken market data. The key design decision that makes this possible is the SDK's use of the browser-native **Web Crypto API** for HMAC signing rather than Node's `crypto` module, which means no native bindings or Node-specific polyfills are needed for the signing path.
+
+## How it works
+
+Two platform-specific concerns are handled deliberately in the SDK to support browsers:
+
+**HMAC signing via Web Crypto API.** All request signing uses `webCryptoAPI` primitives (`SubtleCrypto.sign`, `SubtleCrypto.digest`) that are available natively in every modern browser. There is no dependency on Node's `crypto` module in the signing path. When you instantiate a client with API credentials in a browser, the SDK will call `checkWebCryptoAPISupported()` to confirm the environment provides the necessary crypto surface before attempting to sign requests.
+
+**WebSockets via `isomorphic-ws`.** The `WebsocketClient` uses `isomorphic-ws`, which resolves to the browser's built-in `WebSocket` constructor in browser environments and to the `ws` npm package in Node.js. No special configuration is needed — the SDK adapts automatically.
+
+**Node.js-only modules excluded via webpack fallbacks.** The REST client optionally uses `https.Agent` for connection keep-alive — a Node.js-only feature. The webpack configuration explicitly excludes the `http` and `https` built-in modules so the browser bundle does not pull in Node internals. Browser connection pooling is handled automatically by the browser itself.
+
+## Building a browser bundle with webpack
+
+The repository ships a `webpack.config.cjs` that produces a UMD bundle suitable for script-tag inclusion or module bundler consumption. Here is the full config as found in the source:
+
+```javascript
+// webpack/webpack.config.cjs
+
+const path = require('path');
+const BundleAnalyzerPlugin =
+  require('webpack-bundle-analyzer').BundleAnalyzerPlugin;
+
+function generateConfig(name) {
+  var config = {
+    entry: './dist/cjs/index.js',
+    output: {
+      path: path.resolve(__dirname, '../dist'),
+      filename: name + '.js',
+      sourceMapFilename: name + '.map',
+      library: name,
+      libraryTarget: 'umd',
+    },
+    devtool: 'source-map',
+    mode: 'production',
+
+    resolve: {
+      extensions: ['.webpack.js', '.web.js', '.ts', '.tsx', '.js'],
+      fallback: {
+        // Node.js core modules not available in browsers
+        // The REST client's https.Agent (for keepAlive) is Node.js-only
+        "http": false,
+        "https": false,
+      },
+    },
+
+    module: {
+      rules: [
+        // Code is already transpiled from TypeScript, no additional loaders needed
+      ],
+    },
+  };
+
+  config.plugins = [
+    new BundleAnalyzerPlugin({
+      defaultSizes: 'stat',
+      analyzerMode: 'static',
+      reportFilename: '../doc/bundleReport.html',
+      openAnalyzer: false,
+    }),
+  ];
+
+  return config;
+}
+
+module.exports = generateConfig('krakenapi');
+```
+
+The bundle entry point is `./dist/cjs/index.js`, which means TypeScript must be compiled to CJS before webpack runs. The output is a single `krakenapi.js` file (plus a source map) written to the `dist/` directory, exposed as a UMD library under the global name `krakenapi`.
+
+### Build steps
+
+<Steps>
+  <Step title="Install dependencies">
+    Clone the repository (or work within your own project that depends on `@siebly/kraken-api`) and install all dependencies:
+
+    ```bash
+    npm install
+    ```
+  </Step>
+
+  <Step title="Compile TypeScript">
+    Build the TypeScript source to the CJS output that webpack uses as its entry point:
+
+    ```bash
+    npm run build
+    ```
+
+    This populates `dist/cjs/` with the compiled JavaScript modules.
+  </Step>
+
+  <Step title="Bundle for the browser">
+    Run webpack to produce the browser bundle:
+
+    ```bash
+    npm run pack
+    ```
+
+    The output is `dist/krakenapi.js` and `dist/krakenapi.map`. A static bundle size report is written to `doc/bundleReport.html`.
+  </Step>
+</Steps>
+
+## Using the bundle
+
+Once built, include the bundle in your HTML page via a `<script>` tag. The library is exposed as `krakenapi` on the global `window` object:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Kraken Price Widget</title>
+</head>
+<body>
+  <div id="price">Loading…</div>
+
+  <!-- Include the built bundle -->
+  <script src="/dist/krakenapi.js"></script>
+
+  <script>
+    // krakenapi is available globally after the script loads
+    const { SpotClient } = krakenapi;
+
+    const client = new SpotClient();
+
+    client.getTicker({ pair: 'XBTUSD' }).then((data) => {
+      const price = data?.result?.XXBTZUSD?.c?.[0];
+      document.getElementById('price').textContent =
+        price ? `BTC/USD: $${price}` : 'Error loading price';
+    }).catch((err) => {
+      console.error('Ticker error:', err);
+      document.getElementById('price').textContent = 'Error loading price';
+    });
+  </script>
+</body>
+</html>
+```
+
+If you are using a frontend bundler (Vite, Rollup, another webpack project), you can import from `@siebly/kraken-api` directly and let your bundler resolve the package — the same `http`/`https` fallback configuration applies.
+
+## Important limitations
+
+Before deploying a browser-based Kraken integration, consider these constraints carefully.
+
+**API keys are exposed in client-side code.** Any credentials embedded in a browser bundle or passed to a client-side `SpotClient` are readable by anyone who opens the browser's developer tools. This includes your API key, API secret, and any network traffic. For this reason, private API calls should only be made from browser code in scenarios where the user is providing their own credentials (e.g. a personal dashboard running locally), not in a publicly deployed web application.
+
+**CORS restrictions.** Kraken's REST API does not set permissive CORS headers for browser origins. Direct browser-to-Kraken REST calls may be blocked by the browser's CORS policy. Public WebSocket connections typically work without issue. If you need to make REST calls from a browser in a deployed application, route them through a backend proxy you control.
+
+**Recommended architecture for user-facing apps.** Rather than calling Kraken directly from the browser, proxy sensitive REST calls through your own backend service. The backend holds credentials securely, signs requests server-side, and exposes only the data your frontend needs.
+
+## Public-only browser usage example
+
+The safest and most practical use of the SDK in browser code is read-only public market data — no credentials required, no sensitive data at risk. Here is a minimal ticker widget:
+
+```typescript
+import { SpotClient, WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+// REST: fetch a one-off ticker snapshot
+const restClient = new SpotClient();
+
+async function fetchSpotPrice(pair: string): Promise<string | null> {
+  const data = await restClient.getTicker({ pair });
+  // The response key mirrors the canonical pair name (e.g. XXBTZUSD for XBTUSD)
+  const pairKey = Object.keys(data?.result ?? {})[0];
+  return data?.result?.[pairKey]?.c?.[0] ?? null;
+}
+
+fetchSpotPrice('XBTUSD').then((price) => {
+  if (price) console.log(`Current BTC/USD: $${price}`);
+});
+
+// WebSocket: subscribe to a live ticker stream
+const ws = new WebsocketClient();
+
+ws.on('open', () => console.log('Connected to Kraken WebSocket'));
+ws.on('message', (data) => {
+  // Each message is a structured object — inspect data.type and data.data
+  if (data?.type === 'snapshot' || data?.type === 'update') {
+    console.log('Ticker update:', data.data);
+  }
+});
+ws.on('exception', (err) => console.error('WS error:', err));
+
+ws.subscribe(
+  {
+    topic: 'ticker',
+    payload: { symbol: ['BTC/USD', 'ETH/USD'] },
+  },
+  WS_KEY_MAP.spotPublicV2,
+);
+```
+
+<Warning>
+Never embed your API key or API secret in browser-side JavaScript that will be served to end users. Anyone who visits your page can extract those credentials from the network tab or source view, and use them to trade on your behalf or exhaust your API rate limits. Keep private credentials on your server and proxy requests as needed.
+</Warning>

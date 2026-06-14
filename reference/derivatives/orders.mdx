@@ -1,0 +1,1030 @@
+---
+title: "Derivatives Order Management — DerivativesClient Reference"
+sidebarTitle: "Orders"
+description: "Reference for DerivativesClient order management: submit, edit, cancel, batch operations, cancel-all-after, transfers, and RFQ (Request for Quote) methods."
+---
+
+All order management methods require **API key authentication**. Initialise `DerivativesClient` with your Futures API key and secret — the SDK handles HMAC signing automatically.
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+```
+
+<Tip>
+  Use `client.generateNewOrderID()` to produce a cryptographically random 32-character `cliOrdId`. Providing a client order ID lets you track and reference orders by your own identifier — it also enables idempotent order placement.
+</Tip>
+
+---
+
+## Submit Orders
+
+### `submitOrder(params)`
+
+Places a limit, market, stop, take-profit, immediate-or-cancel, post-only, fill-or-kill, or trailing-stop order for any currently listed futures contract.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/sendorder`
+- **Auth required:** Yes
+
+**Parameters (`FuturesSendOrderParams`):**
+
+<ParamField body="orderType" type="string" required>
+  Order type. One of:
+
+  | Value | Description |
+  |-------|-------------|
+  | `lmt` | Limit order — rests in the book at the specified price |
+  | `mkt` | Market order — executes immediately at best available price |
+  | `post` | Post-only limit — rejected if it would immediately execute as a taker |
+  | `ioc` | Immediate-or-cancel — fills what it can then cancels any remainder |
+  | `fok` | Fill-or-kill — must fill entirely or is fully cancelled |
+  | `stp` | Stop order — triggers a limit order when the stop price is reached |
+  | `take_profit` | Take-profit order — triggers when price moves favourably past the stop price |
+  | `trailing_stop` | Trailing stop — stop price tracks the market at a fixed deviation |
+</ParamField>
+
+<ParamField body="symbol" type="string" required>
+  The futures contract symbol, e.g. `PF_ETHUSD`.
+</ParamField>
+
+<ParamField body="side" type="'buy' | 'sell'" required>
+  Order direction.
+</ParamField>
+
+<ParamField body="size" type="number" required>
+  Order quantity in contract units.
+</ParamField>
+
+<ParamField body="limitPrice" type="number">
+  Limit price. Required for `lmt`, `post`, `stp`, and `take_profit` orders.
+</ParamField>
+
+<ParamField body="stopPrice" type="number">
+  Stop trigger price. Required for `stp`, `take_profit`, and `trailing_stop` orders.
+</ParamField>
+
+<ParamField body="cliOrdId" type="string">
+  Client-assigned order ID (max 36 chars). Use `client.generateNewOrderID()` to generate one.
+</ParamField>
+
+<ParamField body="reduceOnly" type="boolean">
+  If `true`, the order will only reduce an existing position and will not open or increase a position.
+</ParamField>
+
+<ParamField body="triggerSignal" type="'mark' | 'index' | 'last'">
+  The price signal used to trigger stop and take-profit orders. Defaults to `mark`.
+</ParamField>
+
+<ParamField body="trailingStopMaxDeviation" type="number">
+  Maximum trailing stop deviation. Required for `trailing_stop` orders.
+</ParamField>
+
+<ParamField body="trailingStopDeviationUnit" type="'PERCENT' | 'QUOTE_CURRENCY'">
+  Unit for the trailing stop deviation.
+</ParamField>
+
+<ParamField body="limitPriceOffsetValue" type="number">
+  Offset value for the limit price on a stop or take-profit order that generates a limit order on trigger.
+</ParamField>
+
+<ParamField body="limitPriceOffsetUnit" type="'QUOTE_CURRENCY' | 'PERCENT'">
+  Unit for `limitPriceOffsetValue`.
+</ParamField>
+
+<ParamField body="processBefore" type="string">
+  ISO 8601 timestamp. The order is rejected (`wouldProcessAfterSpecifiedTime`) if not processed by this time.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ sendStatus: FuturesSendOrderStatus }>>`
+
+The `FuturesSendOrderStatus.status` field indicates the outcome:
+
+| Status | Description |
+|--------|-------------|
+| `placed` | Order accepted and resting in the book |
+| `partiallyFilled` | IOC order partially executed |
+| `filled` | Order fully executed immediately |
+| `cancelled` | Order was not placed |
+| `marketSuspended` | Market is suspended |
+| `invalidPrice` / `invalidSize` | Validation failure |
+| `insufficientAvailableFunds` | Not enough margin |
+| `postWouldExecute` | Post-only order would have crossed the book |
+| `iocWouldNotExecute` | IOC order found no liquidity |
+| `selfFill` | Would have matched against own order |
+| `wouldCauseLiquidation` | Order would trigger liquidation |
+| `outsidePriceCollar` | Price outside the dislocation protection band |
+
+<Tabs>
+  <Tab title="Limit order">
+    ```typescript
+    import { DerivativesClient } from '@siebly/kraken-api';
+
+    const client = new DerivativesClient({
+      apiKey: process.env.API_FUTURES_KEY,
+      apiSecret: process.env.API_FUTURES_SECRET,
+    });
+
+    const response = await client.submitOrder({
+      orderType: 'lmt',
+      symbol: 'PF_ETHUSD',
+      side: 'buy',
+      size: 0.01,
+      limitPrice: 1800,
+      cliOrdId: client.generateNewOrderID(),
+    });
+
+    console.log('Status:', response.sendStatus.status);
+    console.log('Order ID:', response.sendStatus.order_id);
+    ```
+  </Tab>
+  <Tab title="Market order">
+    ```typescript
+    const response = await client.submitOrder({
+      orderType: 'mkt',
+      symbol: 'PF_ETHUSD',
+      side: 'sell',
+      size: 0.01,
+    });
+
+    console.log('Status:', response.sendStatus.status);
+    ```
+  </Tab>
+  <Tab title="Post-only">
+    ```typescript
+    const response = await client.submitOrder({
+      orderType: 'post',
+      symbol: 'PF_BTCUSD',
+      side: 'buy',
+      size: 0.001,
+      limitPrice: 42000,
+      cliOrdId: client.generateNewOrderID(),
+    });
+
+    // status will be "postWouldExecute" if it would have crossed
+    console.log('Status:', response.sendStatus.status);
+    ```
+  </Tab>
+  <Tab title="Reduce-only">
+    ```typescript
+    // Close part of an existing long position
+    const response = await client.submitOrder({
+      orderType: 'lmt',
+      symbol: 'PF_ETHUSD',
+      side: 'sell',
+      size: 1,
+      limitPrice: 2000,
+      reduceOnly: true,
+    });
+    ```
+  </Tab>
+  <Tab title="Stop order">
+    ```typescript
+    const response = await client.submitOrder({
+      orderType: 'stp',
+      symbol: 'PF_ETHUSD',
+      side: 'sell',
+      size: 0.01,
+      stopPrice: 1700,       // Trigger price
+      limitPrice: 1695,      // Limit price after trigger
+      triggerSignal: 'mark', // Trigger on mark price
+    });
+    ```
+  </Tab>
+  <Tab title="Trailing stop">
+    ```typescript
+    const response = await client.submitOrder({
+      orderType: 'trailing_stop',
+      symbol: 'PF_ETHUSD',
+      side: 'sell',
+      size: 0.01,
+      trailingStopMaxDeviation: 2,
+      trailingStopDeviationUnit: 'PERCENT',
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Edit Orders
+
+### `editOrder(params)`
+
+Amends an existing open order — you can change the size, limit price, stop price, and trailing stop parameters. When trailing stop parameters are sent unchanged, the system recalculates the stop price after the edit.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/editorder`
+- **Auth required:** Yes
+
+**Parameters (`FuturesEditOrderParams`):**
+
+<ParamField body="orderId" type="string">
+  The exchange-assigned order ID to edit. Provide either `orderId` or `cliOrdId`.
+</ParamField>
+
+<ParamField body="cliOrdId" type="string">
+  The client-assigned order ID to edit.
+</ParamField>
+
+<ParamField body="size" type="number">
+  New order quantity.
+</ParamField>
+
+<ParamField body="limitPrice" type="number">
+  New limit price.
+</ParamField>
+
+<ParamField body="stopPrice" type="number">
+  New stop trigger price.
+</ParamField>
+
+<ParamField body="trailingStopMaxDeviation" type="number">
+  New trailing stop deviation value.
+</ParamField>
+
+<ParamField body="trailingStopDeviationUnit" type="'PERCENT' | 'QUOTE_CURRENCY'">
+  Unit for the trailing stop deviation.
+</ParamField>
+
+<ParamField body="qtyMode" type="'ABSOLUTE' | 'RELATIVE'">
+  Whether `size` is an absolute quantity or a relative change to the current order size.
+</ParamField>
+
+<ParamField body="processBefore" type="string">
+  ISO 8601 timestamp deadline for processing.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ editStatus: FuturesEditOrderStatus }>>`
+
+The `editStatus.status` can be `edited`, `invalidSize`, `invalidPrice`, `insufficientAvailableFunds`, `outsidePriceCollar`, `postWouldExecute`, `wouldNotReducePosition`, `orderForEditNotFound`, or `orderForEditNotAStop`.
+
+```typescript
+const response = await client.editOrder({
+  orderId: 'a04d0f84-36d4-4499-8382-96fcfc3ce7aa',
+  limitPrice: 1850,
+  size: 0.02,
+});
+
+console.log('Edit status:', response.editStatus.status);
+console.log('Events:', response.editStatus.orderEvents);
+```
+
+---
+
+## Cancel Orders
+
+### `cancelOrder(params)`
+
+Cancels a single open order identified by exchange order ID or client order ID.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/cancelorder`
+- **Auth required:** Yes
+
+<ParamField body="order_id" type="string">
+  Exchange-assigned order ID to cancel. Provide either `order_id` or `cliOrdId`.
+</ParamField>
+
+<ParamField body="cliOrdId" type="string">
+  Client-assigned order ID to cancel.
+</ParamField>
+
+<ParamField body="processBefore" type="string">
+  ISO 8601 timestamp deadline for processing.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ cancelStatus: FuturesCancelOrderStatus }>>`
+
+Response status: `cancelled`, `filled` (already filled before cancel arrived), or `notFound`.
+
+```typescript
+// Cancel by exchange order ID
+const response = await client.cancelOrder({
+  order_id: 'a04d0f84-36d4-4499-8382-96fcfc3ce7aa',
+});
+console.log('Cancel status:', response.cancelStatus.status);
+
+// Cancel by client order ID
+const response2 = await client.cancelOrder({
+  cliOrdId: 'my-order-id-abc123',
+});
+```
+
+---
+
+### `cancelAllOrders(params?)`
+
+Cancels all open orders, optionally scoped to a specific futures symbol or margin account.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/cancelallorders`
+- **Auth required:** Yes
+
+<ParamField body="symbol" type="string">
+  If provided, only orders for this symbol are cancelled.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ cancelStatus: FuturesCancelAllOrdersStatus }>>`
+
+```typescript
+// Cancel all open orders
+const response = await client.cancelAllOrders();
+console.log('Status:', response.cancelStatus.status);
+console.log('Cancelled:', response.cancelStatus.cancelledOrders.length, 'orders');
+
+// Cancel all orders for a specific symbol
+const symbolResponse = await client.cancelAllOrders({ symbol: 'PF_ETHUSD' });
+```
+
+---
+
+### `cancelAllOrdersAfter(params)`
+
+Implements a **Dead Man's Switch** — sets a countdown timer that will cancel all open orders when it expires. Send this request periodically to reset the timer; send `timeout: 0` to deactivate the switch.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/cancelallordersafter`
+- **Auth required:** Yes
+
+<ParamField body="timeout" type="number" required>
+  Countdown in **seconds** before all orders are cancelled. Set to `0` to deactivate the switch.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ status: FuturesDeadMansSwitchStatus }>>`
+
+The response includes `currentTime` and `triggerTime` (when the cancel will fire if not reset).
+
+<Note>
+  The recommended pattern is to call this every 15–20 seconds with a 60-second timeout. This keeps orders safe during brief connectivity issues while ensuring cancellation on a prolonged outage.
+</Note>
+
+```typescript
+// Activate: cancel all orders in 60 seconds unless reset
+const response = await client.cancelAllOrdersAfter({ timeout: 60 });
+console.log('Will cancel at:', response.status.triggerTime);
+
+// Keep alive — reset the timer every 15 seconds
+setInterval(async () => {
+  await client.cancelAllOrdersAfter({ timeout: 60 });
+}, 15_000);
+
+// Deactivate the switch
+await client.cancelAllOrdersAfter({ timeout: 0 });
+```
+
+---
+
+## Batch Order Management
+
+### `batchOrderManagement(params)`
+
+Sends, edits, and cancels multiple orders in a single atomic request. Each entry in the `batchOrder` array has an `order` field (`'send'`, `'edit'`, or `'cancel'`) that determines its type.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/batchorder`
+- **Auth required:** Yes
+
+**Parameters (`FuturesBatchOrderParams`):**
+
+<ParamField body="json.batchOrder" type="array" required>
+  Array of order operations. Each element is one of `FuturesBatchOrderSend`, `FuturesBatchOrderEdit`, or `FuturesBatchOrderCancel`.
+</ParamField>
+
+<ParamField body="ProcessBefore" type="string">
+  ISO 8601 timestamp. Entire batch is rejected if not processed by this time.
+</ParamField>
+
+**`FuturesBatchOrderSend` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `order` | `'send'` | ✓ | Operation type |
+| `order_tag` | `string` | ✓ | Tag to match responses back to requests |
+| `orderType` | `string` | ✓ | Same values as `submitOrder` |
+| `symbol` | `string` | ✓ | Futures contract symbol |
+| `side` | `'buy' \| 'sell'` | ✓ | Order direction |
+| `size` | `number` | ✓ | Order quantity |
+| `limitPrice` | `number` | — | Limit price |
+| `stopPrice` | `number` | — | Stop trigger price |
+| `cliOrdId` | `string` | — | Client order ID |
+| `reduceOnly` | `boolean` | — | Reduce-only flag |
+| `triggerSignal` | `'mark' \| 'index' \| 'last'` | — | Stop trigger signal |
+
+**`FuturesBatchOrderEdit` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `order` | `'edit'` | ✓ | Operation type |
+| `order_id` | `string` | ✓ | Exchange order ID to edit |
+| `size` | `number` | — | New size |
+| `limitPrice` | `number` | — | New limit price |
+| `stopPrice` | `number` | — | New stop price |
+| `qtyMode` | `'ABSOLUTE' \| 'RELATIVE'` | — | Size mode |
+
+**`FuturesBatchOrderCancel` fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `order` | `'cancel'` | ✓ | Operation type |
+| `order_id` | `string` | — | Exchange order ID to cancel |
+| `cliOrdId` | `string` | — | Client order ID to cancel |
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ batchStatus: FuturesBatchOrderStatus[] }>>`
+
+<Tabs>
+  <Tab title="Submit batch">
+    ```typescript
+    import { DerivativesClient } from '@siebly/kraken-api';
+
+    const client = new DerivativesClient({
+      apiKey: process.env.API_FUTURES_KEY,
+      apiSecret: process.env.API_FUTURES_SECRET,
+    });
+
+    const response = await client.batchOrderManagement({
+      json: {
+        batchOrder: [
+          {
+            order: 'send',
+            order_tag: 'bid-1',
+            orderType: 'lmt',
+            symbol: 'PF_ETHUSD',
+            side: 'buy',
+            size: 0.01,
+            limitPrice: 1800,
+            cliOrdId: client.generateNewOrderID(),
+          },
+          {
+            order: 'send',
+            order_tag: 'bid-2',
+            orderType: 'lmt',
+            symbol: 'PF_ETHUSD',
+            side: 'buy',
+            size: 0.01,
+            limitPrice: 1790,
+            cliOrdId: client.generateNewOrderID(),
+          },
+        ],
+      },
+    });
+
+    for (const result of response.batchStatus) {
+      console.log(result.order_tag, result.status, result.order_id);
+    }
+    ```
+  </Tab>
+  <Tab title="Edit & cancel batch">
+    ```typescript
+    const response = await client.batchOrderManagement({
+      json: {
+        batchOrder: [
+          // Edit an existing order
+          {
+            order: 'edit',
+            order_id: 'a04d1143-757a-4dba-a0a7-687303b9c62d',
+            limitPrice: 1820,
+          },
+          // Cancel another
+          {
+            order: 'cancel',
+            order_id: 'a04d116e-fb9c-4bcf-9eaf-ea90254439b3',
+          },
+        ],
+      },
+    });
+
+    for (const result of response.batchStatus) {
+      console.log(result.status); // "placed" | "edited" | "cancelled" | rejection reason
+    }
+    ```
+  </Tab>
+  <Tab title="Mixed batch">
+    ```typescript
+    const response = await client.batchOrderManagement({
+      json: {
+        batchOrder: [
+          // Place a new order
+          {
+            order: 'send',
+            order_tag: 'new-ask',
+            orderType: 'lmt',
+            symbol: 'PF_ETHUSD',
+            side: 'sell',
+            size: 0.01,
+            limitPrice: 1900,
+          },
+          // Update a stale order
+          {
+            order: 'edit',
+            order_id: 'existing-order-id',
+            limitPrice: 1880,
+          },
+          // Remove a cancelled order
+          {
+            order: 'cancel',
+            cliOrdId: 'old-client-id',
+          },
+        ],
+      },
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Transfers
+
+### `submitWalletTransfer(params)`
+
+Transfers funds between two margin accounts that share the same collateral currency, or between a margin account and the cash account.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/transfer`
+- **Auth required:** Yes
+
+<ParamField body="fromAccount" type="string" required>
+  Source account name, e.g. `flex`, `cash`, or a single-collateral account name like `fi_xbtusd`.
+</ParamField>
+
+<ParamField body="toAccount" type="string" required>
+  Destination account name.
+</ParamField>
+
+<ParamField body="unit" type="string" required>
+  Currency to transfer, e.g. `BTC`, `USDT`, `ETH`.
+</ParamField>
+
+<ParamField body="amount" type="number" required>
+  Amount to transfer.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<Record<string, never>>>`
+
+```typescript
+// Transfer 1 BTC from flex to fi_xbtusd margin account
+await client.submitWalletTransfer({
+  fromAccount: 'flex',
+  toAccount: 'fi_xbtusd',
+  unit: 'BTC',
+  amount: 1,
+});
+```
+
+---
+
+### `submitTransferToSpot(params)`
+
+Withdraws digital assets from your Futures wallet to your Kraken Spot wallet. Wallet names can be found in the `accounts` response from `getAccounts()`.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/withdrawal`
+- **Auth required:** Yes
+
+<ParamField body="currency" type="string" required>
+  Currency to withdraw, e.g. `USDT`, `BTC`, `ETH`.
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to withdraw as a string.
+</ParamField>
+
+<ParamField body="sourceWallet" type="string">
+  Source Futures wallet name. Defaults to the cash wallet.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ uid: string }>>`
+
+```typescript
+const response = await client.submitTransferToSpot({
+  currency: 'USDT',
+  amount: '500',
+  sourceWallet: 'cash',
+});
+
+console.log('Withdrawal UID:', response.uid);
+```
+
+---
+
+### `submitSubaccountTransfer(params)`
+
+Transfers funds between the master account and a subaccount, or between two accounts (margin ↔ cash) on either side.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/transfer/subaccount`
+- **Auth required:** Yes
+
+<ParamField body="fromUser" type="string" required>
+  UID of the source user (master or subaccount).
+</ParamField>
+
+<ParamField body="toUser" type="string" required>
+  UID of the destination user.
+</ParamField>
+
+<ParamField body="fromAccount" type="string" required>
+  Source account name on the `fromUser`.
+</ParamField>
+
+<ParamField body="toAccount" type="string" required>
+  Destination account name on the `toUser`.
+</ParamField>
+
+<ParamField body="unit" type="string" required>
+  Currency to transfer.
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to transfer as a string.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<Record<string, never>>>`
+
+```typescript
+await client.submitSubaccountTransfer({
+  fromUser: 'master-uid',
+  toUser: 'subaccount-uid',
+  fromAccount: 'cash',
+  toAccount: 'cash',
+  unit: 'USDT',
+  amount: '1000',
+});
+```
+
+---
+
+## RFQ (Request for Quote)
+
+<Note>
+  All RFQ methods are currently available **exclusively in the Kraken Futures DEMO environment** and are not available in production.
+</Note>
+
+RFQs (Requests for Quote) allow participants to request and respond to bilateral price quotes for structured trades.
+
+### `getOpenRFQs()`
+
+Retrieves all currently open RFQs.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/rfqs`
+- **Auth required:** No
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ rfqs: FuturesRfq[] }>>`
+
+```typescript
+const response = await client.getOpenRFQs();
+
+for (const rfq of response.rfqs) {
+  console.log(rfq.rfqUid, 'expires:', rfq.expiry, 'mark price:', rfq.markPrice);
+  for (const leg of rfq.legs) {
+    console.log('  Leg:', leg.symbol, leg.size, '@', leg.markPrice);
+  }
+}
+```
+
+---
+
+### `getOpenRFQ(params)`
+
+Retrieves a specific open RFQ by its unique identifier.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/rfqs/{rfqUid}`
+- **Auth required:** No
+
+<ParamField path="rfqUid" type="string" required>
+  The unique identifier of the RFQ to retrieve.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ rfq: FuturesRfq }>>`
+
+```typescript
+const response = await client.getOpenRFQ({ rfqUid: 'rfq-uid-here' });
+console.log(response.rfq);
+```
+
+---
+
+### `getRFQOpenOffers()`
+
+Returns all open offers your account has placed on currently open RFQs.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/rfqs/open-offers`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ openOffers: FuturesOpenOffer[] }>>`
+
+```typescript
+const response = await client.getRFQOpenOffers();
+
+for (const offer of response.openOffers) {
+  console.log(offer.uid, 'on RFQ', offer.rfqUid);
+  console.log('  Bid:', offer.bid, '| Ask:', offer.ask);
+}
+```
+
+---
+
+### `submitRFQNewOffer(params)`
+
+Places a new offer on an open RFQ. At least one of `bid` or `ask` must be provided.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/rfqs/{rfqUid}/place-offer`
+- **Auth required:** Yes
+
+<ParamField path="rfqUid" type="string" required>
+  The RFQ to place an offer on.
+</ParamField>
+
+<ParamField body="bid" type="number">
+  Your bid price for the RFQ amount.
+</ParamField>
+
+<ParamField body="ask" type="number">
+  Your ask price for the RFQ amount.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ offerUid: string }>>`
+
+```typescript
+const response = await client.submitRFQNewOffer({
+  rfqUid: 'rfq-uid-here',
+  bid: 42100,
+  ask: 42200,
+});
+console.log('Offer UID:', response.offerUid);
+```
+
+---
+
+### `updateRFQOpenOffer(params)`
+
+Replaces an existing open offer on an RFQ. At least one of `bid` or `ask` must be provided.
+
+- **HTTP method:** `PUT`
+- **Endpoint:** `derivatives/api/v3/rfqs/{rfqUid}/replace-offer`
+- **Auth required:** Yes
+
+<ParamField path="rfqUid" type="string" required>
+  The RFQ whose offer to replace.
+</ParamField>
+
+<ParamField body="bid" type="number">
+  Updated bid price.
+</ParamField>
+
+<ParamField body="ask" type="number">
+  Updated ask price.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<Record<string, never>>>`
+
+```typescript
+await client.updateRFQOpenOffer({
+  rfqUid: 'rfq-uid-here',
+  bid: 42050,
+  ask: 42150,
+});
+```
+
+---
+
+### `cancelRFQOffer(params)`
+
+Cancels the current open offer on an RFQ.
+
+- **HTTP method:** `DELETE`
+- **Endpoint:** `derivatives/api/v3/rfqs/{rfqUid}/cancel-offer`
+- **Auth required:** Yes
+
+<ParamField path="rfqUid" type="string" required>
+  The RFQ whose offer to cancel.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<Record<string, never>>>`
+
+```typescript
+await client.cancelRFQOffer({ rfqUid: 'rfq-uid-here' });
+```
+
+---
+
+## Assignment Preferences
+
+Assignment programs allow you to participate in contract assignment when counterparty positions are liquidated.
+
+### `getAssignmentPrograms()`
+
+Returns currently active assignment programs.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/assignmentprogram/current`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ participants: FuturesAssignmentProgram[] }>>`
+
+```typescript
+const response = await client.getAssignmentPrograms();
+
+for (const program of response.participants) {
+  console.log(program.id, program.contractType, program.enabled);
+}
+```
+
+---
+
+### `addAssignmentPreference(params)`
+
+Adds an assignment program preference for your account.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/assignmentprogram/add`
+- **Auth required:** Yes
+
+<ParamField body="contractType" type="string" required>
+  The contract type to opt into for assignment.
+</ParamField>
+
+<ParamField body="acceptLong" type="boolean" required>
+  Whether to accept long position assignments.
+</ParamField>
+
+<ParamField body="acceptShort" type="boolean" required>
+  Whether to accept short position assignments.
+</ParamField>
+
+<ParamField body="timeFrame" type="'all' | 'weekdays' | 'weekends'" required>
+  When to be available for assignment.
+</ParamField>
+
+<ParamField body="enabled" type="boolean" required>
+  Whether this preference is active.
+</ParamField>
+
+<ParamField body="contract" type="string">
+  Specific contract symbol (optional, defaults to all contracts of the type).
+</ParamField>
+
+<ParamField body="maxSize" type="number">
+  Maximum position size to accept per assignment.
+</ParamField>
+
+<ParamField body="maxPosition" type="number">
+  Maximum total position size to hold via assignment.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesAssignmentProgram>>`
+
+```typescript
+const response = await client.addAssignmentPreference({
+  contractType: 'futures_vanilla',
+  acceptLong: true,
+  acceptShort: false,
+  timeFrame: 'weekdays',
+  enabled: true,
+  maxSize: 10,
+  maxPosition: 50,
+});
+
+console.log('Created preference ID:', response.id);
+```
+
+---
+
+### `deleteAssignmentPreference(params)`
+
+Deletes an assignment program preference by ID.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/assignmentprogram/delete`
+- **Auth required:** Yes
+
+<ParamField body="id" type="number" required>
+  The ID of the assignment preference to delete.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesAssignmentProgram>>`
+
+```typescript
+await client.deleteAssignmentPreference({ id: 42 });
+```
+
+---
+
+### `getAssignmentPreferencesHistory()`
+
+Returns the full history of assignment program preference changes for your account.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/assignmentprogram/history`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ participants: FuturesAssignmentProgramHistory[] }>>`
+
+```typescript
+const response = await client.getAssignmentPreferencesHistory();
+
+for (const entry of response.participants) {
+  console.log(entry.timestamp, entry.contractType, entry.enabled, entry.deleted);
+}
+```
+
+---
+
+## Utility
+
+### `generateNewOrderID()`
+
+Generates a cryptographically random 32-character string suitable for use as a `cliOrdId`. This is a synchronous local helper — no API call is made.
+
+**Returns:** `string`
+
+```typescript
+const orderId = client.generateNewOrderID();
+// e.g. "V1StGXR8_Z5jdHi6B-myT1234abcdef"
+
+const order = await client.submitOrder({
+  orderType: 'lmt',
+  symbol: 'PF_ETHUSD',
+  side: 'buy',
+  size: 0.01,
+  limitPrice: 1800,
+  cliOrdId: orderId, // Use the generated ID
+});
+```
+
+---
+
+## Full Order Lifecycle Example
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+
+async function orderLifecycle() {
+  const cliOrdId = client.generateNewOrderID();
+
+  // 1. Place a limit order
+  console.log('Placing limit order...');
+  const submitResult = await client.submitOrder({
+    orderType: 'lmt',
+    symbol: 'PF_ETHUSD',
+    side: 'buy',
+    size: 0.01,
+    limitPrice: 1500,
+    cliOrdId,
+  });
+
+  if (submitResult.sendStatus.status !== 'placed') {
+    console.error('Order not placed:', submitResult.sendStatus.status);
+    return;
+  }
+
+  const orderId = submitResult.sendStatus.order_id!;
+  console.log('Order placed:', orderId);
+
+  // 2. Check order status
+  const statusResult = await client.getOrderStatus({ orderIds: [orderId] });
+  console.log('Order status:', statusResult.orders[0]?.status);
+
+  // 3. Edit the order price
+  console.log('Editing order...');
+  const editResult = await client.editOrder({
+    orderId,
+    limitPrice: 1520,
+  });
+  console.log('Edit status:', editResult.editStatus.status);
+
+  // 4. View all open orders
+  const openOrders = await client.getOpenOrders();
+  console.log('Open orders:', openOrders.openOrders.length);
+
+  // 5. Cancel the order
+  console.log('Cancelling order...');
+  const cancelResult = await client.cancelOrder({ order_id: orderId });
+  console.log('Cancel status:', cancelResult.cancelStatus.status);
+
+  // 6. Verify it's gone
+  const fills = await client.getFills();
+  const myFill = fills.fills.find((f) => f.order_id === orderId);
+  if (myFill) {
+    console.log('Order was partially filled before cancel:', myFill);
+  } else {
+    console.log('Order fully cancelled, no fills recorded.');
+  }
+}
+
+orderLifecycle().catch(console.error);
+```

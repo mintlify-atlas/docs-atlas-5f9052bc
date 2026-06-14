@@ -1,0 +1,203 @@
+---
+title: "Authenticate with the Kraken API SDK"
+sidebarTitle: "Authentication"
+description: "Learn how to create Kraken API keys, handle the Spot/Futures credential split, and pass credentials to SpotClient and DerivativesClient securely."
+---
+
+The `@siebly/kraken-api` SDK handles all request signing and WebSocket authentication automatically. You only need to provide your API key and secret when constructing a client — the SDK takes care of generating the correct HMAC signature for each Spot REST call, and the challenge-response token for Futures REST and private WebSocket connections. This page explains where to create keys, what permissions to request, and how to pass credentials to each client type.
+
+<Warning>
+  Never hardcode API keys directly in your source files. Treat them like passwords: store them in environment variables, a secrets manager, or a `.env` file that is excluded from version control. Additionally, keep your Spot and Futures keys strictly separate — they are issued by different systems and are not interchangeable.
+</Warning>
+
+## Spot API keys
+
+Spot API keys are managed at [https://www.kraken.com/u/security/api](https://www.kraken.com/u/security/api). When creating a key, Kraken lets you configure which permissions it carries. Request only the permissions your integration actually needs:
+
+| Use case | Permissions required |
+|---|---|
+| Market data and analytics only | No key needed (public endpoints) |
+| Read account balances and order history | **Query Funds**, **Query Open Orders & Trades**, **Query Closed Orders & Trades** |
+| Spot trading | **Query Funds**, **Query Open Orders & Trades**, **Create & Modify Orders** |
+| Withdrawals | **Withdraw Funds** (only if your integration genuinely requires it) |
+
+<Tip>
+  Trading does not require withdrawal permissions. Analytics does not require trading permissions. Use the minimum permissions needed for each key — if a key is compromised, the blast radius is limited to what that key can actually do.
+</Tip>
+
+## Futures API keys
+
+Futures API keys are managed at [https://futures.kraken.com/settings/api](https://futures.kraken.com/settings/api). These keys are completely separate from Spot keys and are issued by Kraken's Derivatives platform. A key created on the Futures platform will not work with the Spot REST API, and vice versa.
+
+Kraken also provides a Futures demo environment (`https://demo-futures.kraken.com`) for testing without real funds. When using the demo environment, create your test keys through the Futures demo platform, not the live one.
+
+## Using credentials
+
+### SpotClient with API keys
+
+Pass `apiKey` and `apiSecret` as constructor options. The SDK will automatically sign all private Spot REST requests using your credentials.
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+const balance = await client.getAccountBalance();
+console.log('Spot account balance:', balance);
+```
+
+### DerivativesClient with API keys
+
+The `DerivativesClient` accepts the same `apiKey` and `apiSecret` options, but expects Futures credentials from [futures.kraken.com](https://futures.kraken.com/settings/api).
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY!,
+  apiSecret: process.env.API_FUTURES_SECRET!,
+});
+
+const accounts = await client.getAccountsDetails();
+console.log('Futures account details:', accounts);
+```
+
+### DerivativesClient with testnet
+
+Set `testnet: true` to route all Derivatives REST calls to Kraken's demo environment. This is useful for validating your integration against live API behaviour without risking real funds. Note that only `DerivativesClient` supports the `testnet` option — it is not available for `SpotClient`.
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_DEMO_KEY!,
+  apiSecret: process.env.API_FUTURES_DEMO_SECRET!,
+  testnet: true, // routes requests to https://demo-futures.kraken.com
+});
+
+const accounts = await client.getAccountsDetails();
+console.log('Demo account details:', accounts);
+```
+
+### WebsocketClient with credentials for private streams
+
+Pass credentials to `WebsocketClient` to access private account streams such as `executions` and `balances`. The SDK handles WebSocket authentication automatically after the connection is established.
+
+```typescript
+import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+ws.on('authenticated', (data) => {
+  console.log('Private stream authenticated:', data?.wsKey);
+});
+
+ws.on('message', (data) => {
+  console.log('Private stream data:', JSON.stringify(data, null, 2));
+});
+
+ws.on('exception', (data) => {
+  console.error('WebSocket error:', data);
+});
+
+// Subscribe to private Spot execution updates
+ws.subscribe(
+  {
+    topic: 'executions',
+    payload: {
+      snap_trades: true,
+      snap_orders: true,
+      order_status: true,
+    },
+  },
+  WS_KEY_MAP.spotPrivateV2,
+);
+
+// Subscribe to private Spot balance updates
+ws.subscribe(
+  {
+    topic: 'balances',
+    payload: {},
+  },
+  WS_KEY_MAP.spotPrivateV2,
+);
+```
+
+## Environment variables
+
+The recommended approach is to load credentials from environment variables at runtime. This keeps secrets out of your source code and makes it straightforward to use different credentials per environment (development, staging, production).
+
+```bash
+# Spot credentials (from https://www.kraken.com/u/security/api)
+export API_SPOT_KEY='your-spot-api-key'
+export API_SPOT_SECRET='your-spot-api-secret'
+
+# Futures credentials (from https://futures.kraken.com/settings/api)
+export API_FUTURES_KEY='your-futures-api-key'
+export API_FUTURES_SECRET='your-futures-api-secret'
+
+# Futures demo credentials (optional — for testnet usage)
+export API_FUTURES_DEMO_KEY='your-futures-demo-api-key'
+export API_FUTURES_DEMO_SECRET='your-futures-demo-api-secret'
+```
+
+For local development, you can store these in a `.env` file and load it with Node.js's built-in `--env-file` flag (Node.js 20.6+), `process.loadEnvFile()`, or a library like `dotenv`. Make sure `.env` is listed in your `.gitignore`.
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+// Credentials are read from environment variables at runtime
+const spotClient = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const derivativesClient = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY!,
+  apiSecret: process.env.API_FUTURES_SECRET!,
+});
+```
+
+## Public vs private endpoints
+
+Many Kraken API endpoints are public and do not require authentication. You can create a `SpotClient` or `DerivativesClient` with no arguments at all and immediately start querying market data.
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+import { DerivativesClient } from '@siebly/kraken-api';
+
+// No credentials needed for public endpoints
+const spotPublic = new SpotClient();
+const futuresPublic = new DerivativesClient();
+
+// These all work without API keys
+const serverTime = await spotPublic.getServerTime();
+const ticker = await spotPublic.getTicker({ pair: 'XBTUSD' });
+const futuresTicker = await futuresPublic.getTickers();
+```
+
+Private endpoints — account balances, order placement and management, trade history, withdrawals — will throw an authentication error if called without credentials. The distinction is clear in the SDK: any method that touches account-specific data requires a client constructed with `apiKey` and `apiSecret`.
+
+## RestClientOptions reference
+
+The following options are accepted by `SpotClient`, `DerivativesClient`, `InstitutionalClient`, and `PartnerClient`:
+
+| Option | Type | Description |
+|---|---|---|
+| `apiKey` | `string` | Your Kraken API key |
+| `apiSecret` | `string` | Your Kraken API secret |
+| `testnet` | `boolean` | Route requests to Kraken's demo environment. Currently only supported by `DerivativesClient`. |
+| `baseUrl` | `string` | Override the API base URL entirely (e.g. for proxying) |
+| `strictParamValidation` | `boolean` | If `true`, throws an error when any request parameter is `undefined`. Default: `false`. |
+| `parseExceptions` | `boolean` | Whether to post-process and re-throw request exceptions. Default: `true`. |
+| `keepAlive` | `boolean` | Enable HTTP keep-alive for REST requests via axios. |
+| `keepAliveMsecs` | `number` | Interval (ms) for TCP keep-alive packets when `keepAlive` is `true`. Default: `1000`. |
+| `customSignMessageFn` | `function` | Provide a custom HMAC signing function (e.g. Node's `createHmac` for better performance). |

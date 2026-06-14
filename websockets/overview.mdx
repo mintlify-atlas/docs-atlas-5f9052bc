@@ -1,0 +1,209 @@
+---
+title: "WebSocket Integration with the Kraken SDK"
+sidebarTitle: "Overview"
+description: "Learn how the Kraken SDK's WebsocketClient manages connections, authentication, heartbeats, automatic reconnection, and resubscription across all Kraken markets."
+---
+
+The `@siebly/kraken-api` SDK ships two distinct WebSocket interfaces that cover every real-time use case on Kraken: a general-purpose streaming client for market data and account updates, and a command-oriented client for low-latency Spot order management over a persistent connection. Both share the same underlying connection lifecycle machinery — heartbeats, reconnect, re-authentication, and resubscription are all handled automatically.
+
+## Two WebSocket interfaces
+
+<CardGroup cols={2}>
+  <Card title="WebsocketClient" icon="tower-broadcast">
+    **Streaming subscriptions** — subscribe to public market data (tickers, trades, order books, OHLC candles, instruments) and private account streams (executions, balances, positions) across Spot and Futures markets. Use `WS_KEY_MAP` to route each subscription to the correct endpoint.
+  </Card>
+  <Card title="WebsocketAPIClient" icon="bolt">
+    **REST-like commands over WebSocket** — send Spot trading commands (`add_order`, `amend_order`, `cancel_order`, etc.) over a persistent authenticated connection and `await` the response exactly like a REST call. Currently Spot only.
+  </Card>
+</CardGroup>
+
+---
+
+## `WS_KEY_MAP` — connection keys explained
+
+Every `subscribe()` call and every `WebsocketAPIClient` method requires a **WsKey** that tells the SDK which WebSocket endpoint to use. The SDK maintains a separate physical connection for each key, so you can have public and private connections open simultaneously without interference.
+
+```typescript
+import { WS_KEY_MAP } from '@siebly/kraken-api';
+```
+
+| Key | Endpoint URL | Purpose |
+|---|---|---|
+| `spotPublicV2` | `wss://ws.kraken.com/v2` | Spot public streams: ticker, trade, book, ohlc, instrument |
+| `spotPrivateV2` | `wss://ws-auth.kraken.com/v2` | Spot private streams: executions, balances |
+| `spotL3V2` | `wss://ws-l3.kraken.com/v2` | Level 3 order book (dedicated endpoint) |
+| `spotBetaPublicV2` | `wss://beta-ws.kraken.com/v2` | Spot beta public — early-access features |
+| `spotBetaPrivateV2` | `wss://beta-ws-auth.kraken.com/v2` | Spot beta private |
+| `derivativesPublicV1` | `wss://futures.kraken.com/ws/v1` | Futures public streams: ticker, ticker_lite, book, trade |
+| `derivativesPrivateV1` | `wss://futures.kraken.com/ws/v1` | Futures private streams: open_orders, fills, balances, open_positions, and more |
+
+<Note>
+  `derivativesPublicV1` and `derivativesPrivateV1` share the same upstream URL, but the SDK maintains **two separate connections** — one unauthenticated, one authenticated — for simpler lifecycle management and to avoid cross-contamination of authentication state.
+</Note>
+
+---
+
+## Events reference
+
+Set up event listeners immediately after constructing the client, before making any `subscribe()` calls. The SDK emits these events throughout the connection lifecycle:
+
+| Event | When it fires | Recommended action |
+|---|---|---|
+| `open` | A WebSocket connection is successfully established | Log for visibility; safe to subscribe |
+| `message` | A streaming data update arrives (topic snapshot or update) | Parse `data.channel` to route to your handler |
+| `response` | Acknowledgement for subscribe / unsubscribe / auth requests | Verify `success: true`; log errors |
+| `reconnecting` | Heartbeat timeout detected; SDK is tearing down the stale connection | Pause order management; do not send new commands |
+| `reconnected` | New connection opened, re-authenticated, and all topics resubscribed | Query REST API to reconcile any state drift |
+| `close` | Socket closed (could be expected or unexpected) | If unexpected, `reconnecting` will fire shortly after |
+| `authenticated` | Private connection auth handshake completed | Log for auditing; WS API is now ready |
+| `exception` | An error or unexpected server message was received | Log `data` in full; contains error detail |
+
+```typescript
+import { WebsocketClient } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient();
+
+ws.on('open', (data) => {
+  console.log('connected:', data.wsKey);
+});
+
+ws.on('message', (data) => {
+  console.log('data:', JSON.stringify(data));
+});
+
+ws.on('response', (data) => {
+  console.log('server reply:', JSON.stringify(data));
+});
+
+ws.on('reconnecting', (data) => {
+  console.warn('reconnecting — pause order management:', data.wsKey);
+});
+
+ws.on('reconnected', (data) => {
+  console.log('reconnected — reconcile state via REST:', data.wsKey);
+});
+
+ws.on('close', (data) => {
+  console.log('connection closed:', data);
+});
+
+ws.on('authenticated', (data) => {
+  console.log('authenticated:', data.wsKey);
+});
+
+ws.on('exception', (data) => {
+  console.error('exception:', JSON.stringify(data));
+});
+```
+
+---
+
+## Connection lifecycle
+
+The SDK manages the full WebSocket lifecycle without any manual intervention required. Here is the sequence of events from first connection through an automatic recovery:
+
+<Steps>
+  <Step title="Connect">
+    The first `subscribe()` call triggers a connection to the appropriate endpoint derived from the `WsKey`. Public connections open immediately; private connections proceed to the auth step.
+  </Step>
+  <Step title="Authenticate">
+    For private `WsKey` values (`spotPrivateV2`, `spotL3V2`, `spotBetaPrivateV2`, `derivativesPrivateV1`), the SDK automatically handles the authentication handshake:
+    - **Spot private**: fetches a WebSocket token via the REST API and injects it into each subscription payload.
+    - **Derivatives private**: sends a `challenge` event with your API key, receives the challenge string, hashes and signs it, then transmits the signed challenge alongside each subscription.
+  </Step>
+  <Step title="Subscribe">
+    Each topic passed to `subscribe()` is dispatched as a correctly structured request. Topics are cached internally so they can be resubscribed automatically on reconnect.
+  </Step>
+  <Step title="Heartbeat monitoring">
+    The SDK sends periodic `ping` messages and expects `pong` replies within the configured `pongTimeout`. If no reply arrives in time, the SDK flags the connection as stale.
+  </Step>
+  <Step title="Reconnect">
+    On a detected disconnect, the SDK emits `reconnecting`, tears down the stale socket, waits for `reconnectTimeout`, then opens a fresh connection — re-authenticating and resubscribing all cached topics automatically.
+  </Step>
+  <Step title="Reconnected">
+    Once all topics are resubscribed, the SDK emits `reconnected`. This is the correct time to call your REST API for any account or market state that may have changed while the connection was down.
+  </Step>
+</Steps>
+
+---
+
+## Instantiation examples
+
+<Tabs>
+  <Tab title="Public (no keys)">
+    ```typescript
+    import { WebsocketClient } from '@siebly/kraken-api';
+
+    // No API keys needed for public market data
+    const ws = new WebsocketClient();
+    ```
+  </Tab>
+  <Tab title="Private (with keys)">
+    ```typescript
+    import { WebsocketClient } from '@siebly/kraken-api';
+
+    const ws = new WebsocketClient({
+      apiKey: process.env.API_SPOT_KEY!,
+      apiSecret: process.env.API_SPOT_SECRET!,
+    });
+    ```
+  </Tab>
+  <Tab title="With custom logger">
+    ```typescript
+    import {
+      WebsocketClient,
+      DefaultLogger,
+      LogParams,
+    } from '@siebly/kraken-api';
+
+    const customLogger: DefaultLogger = {
+      trace: (..._params: LogParams): void => {
+        // suppress trace logs in production
+      },
+      info: (...params: LogParams): void => {
+        console.log('info', ...params);
+      },
+      error: (...params: LogParams): void => {
+        console.error('error', ...params);
+      },
+    };
+
+    const ws = new WebsocketClient(
+      {
+        apiKey: process.env.API_SPOT_KEY!,
+        apiSecret: process.env.API_SPOT_SECRET!,
+      },
+      customLogger,
+    );
+    ```
+  </Tab>
+  <Tab title="Configurable timeouts">
+    ```typescript
+    import { WebsocketClient } from '@siebly/kraken-api';
+
+    const ws = new WebsocketClient({
+      apiKey: process.env.API_SPOT_KEY!,
+      apiSecret: process.env.API_SPOT_SECRET!,
+      pingInterval: 10000,      // ms between pings (default: ~10 000)
+      pongTimeout: 7500,        // ms to wait for pong before reconnecting
+      reconnectTimeout: 500,    // ms to wait before opening a new connection
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Public Streams" icon="chart-line" href="/websockets/public-streams">
+    Subscribe to live Spot and Futures market data — tickers, trades, order books, OHLC candles, and instruments.
+  </Card>
+  <Card title="Private Streams" icon="lock" href="/websockets/private-streams">
+    Stream authenticated account data — order executions, balances, open positions, and Level 3 order book.
+  </Card>
+  <Card title="WS API Client" icon="bolt" href="/websockets/websocket-api-client">
+    Place, amend, and cancel Spot orders over a persistent WebSocket connection with promise-based async/await.
+  </Card>
+</CardGroup>

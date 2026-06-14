@@ -1,0 +1,383 @@
+---
+title: "Subscribe to Kraken Public WebSocket Market Data"
+sidebarTitle: "Public Streams"
+description: "Stream live Kraken market data — tickers, trades, order books, OHLC candles, and instruments — over WebSocket for both Spot and Futures markets."
+---
+
+Public streams require no API keys. The `WebsocketClient` connects to the correct endpoint automatically based on the `WsKey` you pass to `subscribe()`. Every subscription is persistent — if the connection drops, the SDK reconnects and resubscribes without any code on your side.
+
+## Setup
+
+```typescript
+import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+// No API keys needed for public market data
+const ws = new WebsocketClient();
+
+ws.on('open', (data) => console.log('connected:', data.wsKey));
+ws.on('message', (data) => console.log('data:', JSON.stringify(data)));
+ws.on('response', (data) => console.log('server reply:', JSON.stringify(data)));
+ws.on('reconnected', (data) => console.log('reconnected:', data.wsKey));
+ws.on('exception', (data) => console.error('exception:', data));
+```
+
+---
+
+## Spot public topics
+
+Spot public streams connect via `WS_KEY_MAP.spotPublicV2` (`wss://ws.kraken.com/v2`). The available topics are `ticker`, `trade`, `book`, `ohlc`, and `instrument`.
+
+<Tabs>
+  <Tab title="ticker">
+    Stream best-bid-offer price updates for one or more symbols. By default, snapshots are sent on connect and updates fire on every trade or BBO change.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'ticker',
+        payload: {
+          symbol: ['BTC/USD', 'ETH/USD'],
+          // event_trigger: 'bbo',    // fire only on best-bid-offer changes
+          // event_trigger: 'trades', // fire only on trades
+          // snapshot: true,          // default: true
+        },
+      },
+      WS_KEY_MAP.spotPublicV2,
+    );
+    ```
+  </Tab>
+  <Tab title="trade">
+    Receive a stream of individual trades as they occur on the exchange.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'trade',
+        payload: {
+          symbol: ['BTC/USD', 'BTC/GBP'],
+          // snapshot: true, // default: true — sends recent trades on connect
+        },
+      },
+      WS_KEY_MAP.spotPublicV2,
+    );
+    ```
+  </Tab>
+  <Tab title="book">
+    Subscribe to the Level 2 order book. Depth can be configured from 10 to 1000 levels.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'book',
+        payload: {
+          symbol: ['BTC/USD', 'BTC/GBP'],
+          depth: 10, // Possible values: 10, 25, 100, 500, 1000 — default: 10
+          // snapshot: true, // default: true
+        },
+      },
+      WS_KEY_MAP.spotPublicV2,
+    );
+    ```
+  </Tab>
+  <Tab title="ohlc">
+    Receive OHLC (candlestick) data at a configurable interval. A snapshot of the current candle is sent on connect, followed by incremental updates.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'ohlc',
+        payload: {
+          symbol: ['BTC/USD', 'ETH/USD'],
+          interval: 1, // Possible values: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+          // snapshot: true, // default: true
+        },
+      },
+      WS_KEY_MAP.spotPublicV2,
+    );
+    ```
+  </Tab>
+  <Tab title="instrument">
+    Stream instrument metadata for trading pairs, including optional tokenized asset (xStocks) information.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'instrument',
+        payload: {
+          symbol: ['BTC/USD', 'ETH/USD'],
+          include_tokenized_assets: true, // Include xStocks — default: false
+          // snapshot: true, // default: true
+        },
+      },
+      WS_KEY_MAP.spotPublicV2,
+    );
+    ```
+  </Tab>
+</Tabs>
+
+### Batch subscription
+
+Instead of calling `subscribe()` multiple times, pass an array of topic requests in a single call. All topics must share the same `WsKey`.
+
+```typescript
+import { WebsocketClient, WS_KEY_MAP, WSTopicRequest } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient();
+
+const tickerRequest: WSTopicRequest = {
+  topic: 'ticker',
+  payload: { symbol: ['BTC/USD', 'ETH/USD'] },
+};
+
+const tradeRequest: WSTopicRequest = {
+  topic: 'trade',
+  payload: { symbol: ['BTC/USD'] },
+};
+
+const instrumentRequest: WSTopicRequest = {
+  topic: 'instrument',
+  payload: {
+    symbol: ['BTC/USD'],
+    include_tokenized_assets: true,
+  },
+};
+
+// Subscribe to all three topics in one call
+ws.subscribe(
+  [tickerRequest, tradeRequest, instrumentRequest],
+  WS_KEY_MAP.spotPublicV2,
+);
+```
+
+### Complete Spot public example
+
+```typescript
+import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient();
+
+ws.on('open', (data) => {
+  console.log('connected:', data.wsKey);
+});
+
+ws.on('message', (data) => {
+  // All streaming topic updates arrive here
+  console.log('data received:', JSON.stringify(data));
+});
+
+ws.on('response', (data) => {
+  // Subscribe/unsubscribe acknowledgements from the server
+  console.log('server reply:', JSON.stringify(data));
+});
+
+ws.on('reconnecting', (data) => {
+  console.warn('reconnecting:', data.wsKey);
+});
+
+ws.on('reconnected', (data) => {
+  console.log('reconnected:', data.wsKey);
+});
+
+ws.on('exception', (data) => {
+  console.error('exception:', data);
+});
+
+// Subscribe to ticker and order book for BTC/USD
+ws.subscribe(
+  [
+    {
+      topic: 'ticker',
+      payload: { symbol: ['BTC/USD'] },
+    },
+    {
+      topic: 'book',
+      payload: { symbol: ['BTC/USD'], depth: 10 },
+    },
+  ],
+  WS_KEY_MAP.spotPublicV2,
+);
+```
+
+---
+
+## Futures public topics
+
+Futures (derivatives) public streams use `WS_KEY_MAP.derivativesPublicV1` and connect to `wss://futures.kraken.com/ws/v1`. The available topics are `ticker`, `ticker_lite`, `book`, and `trade`. Futures payloads use `product_ids` instead of `symbol`.
+
+<Tabs>
+  <Tab title="ticker">
+    Full ticker data for perpetual futures contracts.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'ticker',
+        payload: {
+          product_ids: ['PI_XBTUSD', 'PI_ETHUSD'],
+        },
+      },
+      WS_KEY_MAP.derivativesPublicV1,
+    );
+    ```
+  </Tab>
+  <Tab title="ticker_lite">
+    A lighter-weight ticker with fewer fields — useful for systems that only need price and volume.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'ticker_lite',
+        payload: {
+          product_ids: ['PI_XBTUSD', 'PI_ETHUSD'],
+        },
+      },
+      WS_KEY_MAP.derivativesPublicV1,
+    );
+    ```
+  </Tab>
+  <Tab title="book">
+    Level 2 order book updates for Futures products.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'book',
+        payload: {
+          product_ids: ['PI_XBTUSD', 'PI_ETHUSD'],
+        },
+      },
+      WS_KEY_MAP.derivativesPublicV1,
+    );
+    ```
+  </Tab>
+  <Tab title="trade">
+    Individual trade events for Futures markets.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'trade',
+        payload: {
+          product_ids: ['PI_XBTUSD', 'PI_ETHUSD'],
+        },
+      },
+      WS_KEY_MAP.derivativesPublicV1,
+    );
+    ```
+  </Tab>
+</Tabs>
+
+### Complete Futures public example
+
+```typescript
+import {
+  WebsocketClient,
+  WS_KEY_MAP,
+  WSTopicRequest,
+} from '@siebly/kraken-api';
+import { WSDerivativesTopic } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient();
+
+ws.on('open', (data) => {
+  console.log('connected:', data.wsKey);
+});
+
+ws.on('message', (data) => {
+  console.log('data received:', JSON.stringify(data));
+});
+
+ws.on('response', (data) => {
+  console.log('server reply:', JSON.stringify(data));
+});
+
+ws.on('reconnected', (data) => {
+  console.log('reconnected:', data.wsKey);
+});
+
+ws.on('exception', (data) => {
+  console.error('exception:', data);
+});
+
+// Subscribe to futures trades and order book
+const tradeRequest: WSTopicRequest<WSDerivativesTopic> = {
+  topic: 'trade',
+  payload: { product_ids: ['PI_XBTUSD', 'PI_ETHUSD'] },
+};
+
+const bookRequest: WSTopicRequest<WSDerivativesTopic> = {
+  topic: 'book',
+  payload: { product_ids: ['PI_XBTUSD'] },
+};
+
+ws.subscribe(tradeRequest, WS_KEY_MAP.derivativesPublicV1);
+ws.subscribe(bookRequest, WS_KEY_MAP.derivativesPublicV1);
+```
+
+---
+
+## Testnet / demo environment
+
+The Kraken Derivatives environment supports a testnet (demo) mode. Set `testnet: true` in the constructor and the SDK routes connections to `wss://demo-futures.kraken.com/ws/v1` automatically. Spot does not currently have a separate testnet WebSocket endpoint.
+
+```typescript
+import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient({
+  testnet: true, // Routes derivatives connections to demo-futures.kraken.com
+});
+
+ws.subscribe(
+  {
+    topic: 'ticker',
+    payload: { product_ids: ['PI_XBTUSD'] },
+  },
+  WS_KEY_MAP.derivativesPublicV1,
+);
+```
+
+<Note>
+  The `testnet` flag only affects `derivativesPublicV1` and `derivativesPrivateV1` connections. It has no effect on Spot WebSocket connections.
+</Note>
+
+---
+
+## Unsubscribing
+
+Call `ws.unsubscribe()` with the same request shape used when subscribing. The topic is removed from the internal cache so it will **not** be resubscribed after a reconnect.
+
+```typescript
+// Unsubscribe from a single topic
+ws.unsubscribe(
+  {
+    topic: 'ticker',
+    payload: { symbol: ['BTC/USD'] },
+  },
+  WS_KEY_MAP.spotPublicV2,
+);
+
+// Unsubscribe from multiple topics at once
+ws.unsubscribe(
+  [
+    { topic: 'trade', payload: { symbol: ['BTC/USD'] } },
+    { topic: 'book', payload: { symbol: ['BTC/USD'], depth: 10 } },
+  ],
+  WS_KEY_MAP.spotPublicV2,
+);
+```
+
+---
+
+## Topic reference
+
+| Market | Topic | `WsKey` | Notes |
+|---|---|---|---|
+| Spot | `ticker` | `spotPublicV2` | Best-bid-offer prices |
+| Spot | `trade` | `spotPublicV2` | Individual trade events |
+| Spot | `book` | `spotPublicV2` | Level 2 order book; configurable depth |
+| Spot | `ohlc` | `spotPublicV2` | Candlestick data; configurable interval |
+| Spot | `instrument` | `spotPublicV2` | Instrument metadata |
+| Futures | `ticker` | `derivativesPublicV1` | Full ticker |
+| Futures | `ticker_lite` | `derivativesPublicV1` | Lightweight ticker |
+| Futures | `book` | `derivativesPublicV1` | Level 2 order book |
+| Futures | `trade` | `derivativesPublicV1` | Trade events |

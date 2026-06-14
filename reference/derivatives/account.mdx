@@ -1,0 +1,942 @@
+---
+title: "Derivatives Account Methods — DerivativesClient Reference"
+sidebarTitle: "Account"
+description: "Reference for DerivativesClient private account methods: account balances, fills, positions, order/position/trigger events, account log, leverage, and PnL preferences."
+---
+
+All methods on this page interact with **private, authenticated endpoints** of the Kraken Futures API. You must initialise `DerivativesClient` with a valid API key and secret. The client handles request signing automatically.
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+```
+
+<Note>
+  Kraken Futures API keys are separate from Spot API keys. Generate them from the Futures section of your Kraken account settings.
+</Note>
+
+---
+
+## Account State
+
+### `getAccounts()`
+
+Returns key information about all your Futures accounts — cash accounts, single-collateral margin accounts, and the multi-collateral flex account. Includes balances, margin requirements, margin trigger estimates, available funds, PnL of open positions, and portfolio value.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/accounts`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ accounts: FuturesAccounts }>>`
+
+The `FuturesAccounts` object is a keyed map where each entry is one of:
+- `FuturesCashAccount` — `type: 'cashAccount'`, with `balances` map
+- `FuturesFlexAccount` — `type: 'multiCollateralMarginAccount'`, full margin breakdown
+- `FuturesMarginAccount` — single-collateral account with `auxiliary`, `marginRequirements`, and `triggerEstimates`
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+
+const response = await client.getAccounts();
+const { accounts } = response;
+
+// Cash account balances
+console.log(accounts.cash?.balances);
+
+// Multi-collateral flex account
+const flex = accounts.flex;
+if (flex) {
+  console.log('Available margin:', flex.available);
+  console.log('Portfolio value:', flex.portfolioValue);
+  console.log('Maintenance margin:', flex.maintenanceMargin);
+  console.log('PnL:', flex.pnl);
+}
+```
+
+---
+
+### `checkApiKeyV3()`
+
+Verifies your API key and returns its full details — access level, account UID, permissions, and any IP allow-list.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/auth/v1/api-keys/v3/check`
+- **Auth required:** Yes
+
+**Returns:** `Promise<FuturesApiKeyV3Check>`
+
+```typescript
+const keyInfo = await client.checkApiKeyV3();
+
+console.log('Account UID:', keyInfo.accountUid);
+console.log('General access:', keyInfo.permissions.general);   // "NO_ACCESS" | "READ_ONLY" | "FULL_ACCESS"
+console.log('Transfer access:', keyInfo.permissions.transfer);
+console.log('Allowed CIDR:', keyInfo.allowedCidrBlock);
+```
+
+---
+
+### `getNotifications()`
+
+Returns the platform's current active notifications — scheduled maintenance, new features, market events, and more.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/notifications`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ notifications: FuturesNotification[] }>>`
+
+Each `FuturesNotification` includes:
+- `note` — the notification message
+- `priority` — `low`, `medium`, or `high`
+- `type` — `new_feature`, `bug_fix`, `settlement`, `general`, `maintenance`, or `market`
+- `effectiveTime` — ISO 8601 timestamp
+- `expectedDowntimeMinutes` — optional downtime duration for maintenance events
+
+```typescript
+const response = await client.getNotifications();
+
+for (const notification of response.notifications) {
+  console.log(`[${notification.priority.toUpperCase()}] ${notification.type}: ${notification.note}`);
+}
+```
+
+---
+
+### `getAccountMarketShare()`
+
+Returns your account's market share, volumes, and accrued rebates in contracts configured for rebates.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/stats/v1/rebates/self-market-share`
+- **Auth required:** Yes
+
+**Returns:** `Promise<FuturesMarketShare>`
+
+<Note>
+  Data may not be immediately available. In those cases the API returns HTTP 204, which the SDK surfaces as an empty response.
+</Note>
+
+```typescript
+const marketShare = await client.getAccountMarketShare();
+
+for (const [symbol, data] of Object.entries(marketShare.contracts)) {
+  console.log(symbol, data.marketShare, data.volume, data.usdRebateCredited);
+}
+```
+
+---
+
+### `getAccountLog(params?)`
+
+Lists account log entries, paged by timestamp or by entry ID. Covers all account activity: futures trades, liquidations, funding rate charges, conversions, transfers, settlements, and fees.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/account-log`
+- **Auth required:** Yes
+
+<ParamField query="since" type="number">
+  Return entries after this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="before" type="number">
+  Return entries before this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="from" type="number">
+  ID of the first entry to return (inclusive). Use for ID-based pagination.
+</ParamField>
+
+<ParamField query="to" type="number">
+  ID of the last entry to return (inclusive). Use for ID-based pagination.
+</ParamField>
+
+<ParamField query="sort" type="'asc' | 'desc'">
+  Sort order. `desc` returns newest entries first.
+</ParamField>
+
+<ParamField query="info" type="string[]">
+  Filter by entry types, e.g. `['futures trade', 'transfer', 'funding rate change']`.
+</ParamField>
+
+<ParamField query="count" type="number">
+  Maximum number of entries to return.
+</ParamField>
+
+<ParamField query="conversion_details" type="boolean">
+  Include conversion detail fields in the response.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesAccountLog>>`
+
+<Tabs>
+  <Tab title="Recent activity">
+    ```typescript
+    const log = await client.getAccountLog({
+      count: 50,
+      sort: 'desc',
+    });
+
+    for (const entry of log.logs) {
+      console.log(entry.date, entry.info, entry.new_balance);
+    }
+    ```
+  </Tab>
+  <Tab title="Filtered by type">
+    ```typescript
+    const tradeLog = await client.getAccountLog({
+      info: ['futures trade', 'funding rate change'],
+      count: 100,
+      sort: 'desc',
+    });
+    ```
+  </Tab>
+  <Tab title="Time range">
+    ```typescript
+    const rangeLog = await client.getAccountLog({
+      since: Date.now() - 86400000 * 7, // 7 days ago in ms
+      before: Date.now(),
+      sort: 'asc',
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `getAccountLogCsv(params?)`
+
+Returns recent account log entries in CSV format, suitable for export.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/accountlogcsv`
+- **Auth required:** Yes
+
+<ParamField query="conversion_details" type="boolean">
+  Include conversion detail columns in the CSV output.
+</ParamField>
+
+**Returns:** `Promise<string>`
+
+```typescript
+const csv = await client.getAccountLogCsv({ conversion_details: true });
+
+// Write to file, parse with a CSV library, etc.
+require('fs').writeFileSync('account-log.csv', csv);
+```
+
+---
+
+## Positions
+
+### `getOpenPositions()`
+
+Returns the size and average entry price of all open positions across all futures contracts, including matured but not yet settled contracts.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/openpositions`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ openPositions: FuturesOpenPosition[] }>>`
+
+Each `FuturesOpenPosition` includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | `string` | Futures contract symbol |
+| `side` | `'long' \| 'short'` | Position direction |
+| `size` | `number` | Position size in contracts |
+| `price` | `number` | Average entry price |
+| `fillTime` | `string` | ISO 8601 timestamp when position was opened |
+| `unrealizedFunding` | `number \| null` | Accrued but unrealised funding |
+| `pnlCurrency` | `string \| null` | PnL settlement currency |
+
+```typescript
+const response = await client.getOpenPositions();
+
+for (const position of response.openPositions) {
+  console.log(
+    position.symbol,
+    position.side,
+    position.size,
+    '@',
+    position.price,
+  );
+}
+```
+
+---
+
+### `getPositionPercentile()`
+
+Returns each open position's percentile in the unwind queue — useful for understanding liquidation priority.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/unwindqueue`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ queue: FuturesUnwindQueuePosition[] }>>`
+
+```typescript
+const response = await client.getPositionPercentile();
+
+for (const entry of response.queue) {
+  console.log(entry.symbol, `${entry.percentile}th percentile in unwind queue`);
+}
+```
+
+---
+
+### `getPositionEvents(params?)`
+
+Lists position update events — opened, closed, increased, decreased, reversed, and settled positions — for your account. Supports rich filtering by event type and time range.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/positions`
+- **Auth required:** Yes
+
+<ParamField query="since" type="number">
+  Return events after this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="before" type="number">
+  Return events before this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="sort" type="'asc' | 'desc'">
+  Sort order.
+</ParamField>
+
+<ParamField query="count" type="number">
+  Number of events to return per page.
+</ParamField>
+
+<ParamField query="continuation_token" type="string">
+  Pagination token from a previous response.
+</ParamField>
+
+<ParamField query="tradeable" type="string">
+  Filter to a specific symbol, e.g. `PF_ETHUSD`.
+</ParamField>
+
+<ParamField query="opened" type="boolean">
+  Include position-opened events.
+</ParamField>
+
+<ParamField query="closed" type="boolean">
+  Include position-closed events.
+</ParamField>
+
+<ParamField query="increased" type="boolean">
+  Include position-increased events.
+</ParamField>
+
+<ParamField query="decreased" type="boolean">
+  Include position-decreased events.
+</ParamField>
+
+<ParamField query="reversed" type="boolean">
+  Include position-reversed events.
+</ParamField>
+
+<ParamField query="funding_realization" type="boolean">
+  Include funding realisation events.
+</ParamField>
+
+<ParamField query="settlement" type="boolean">
+  Include settlement events.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesHistoryResponse<FuturesPositionUpdateEvent>>>`
+
+```typescript
+const response = await client.getPositionEvents({
+  tradeable: 'PF_ETHUSD',
+  opened: true,
+  closed: true,
+  count: 50,
+  sort: 'desc',
+});
+
+for (const element of response.elements) {
+  const event = element.event as FuturesPositionUpdateEvent;
+  console.log(event.positionChange, event.tradeable, event.newPosition);
+}
+```
+
+---
+
+## Fills & Executions
+
+### `getFills(params?)`
+
+Returns trade fill history for your account. Returns the 100 most recent fills, or fills before a specified time.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/fills`
+- **Auth required:** Yes
+
+<ParamField query="lastFillTime" type="string">
+  ISO 8601 timestamp. Returns the 100 most recent fills **before** this time.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ fills: FuturesFill[] }>>`
+
+Each `FuturesFill` includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `fill_id` | `string` | Unique fill identifier |
+| `order_id` | `string` | Associated order ID |
+| `symbol` | `string` | Futures contract |
+| `side` | `'buy' \| 'sell' \| 'unknown'` | Fill direction |
+| `size` | `number` | Fill size |
+| `price` | `number` | Fill price |
+| `fillTime` | `string` | ISO 8601 execution timestamp |
+| `fillType` | `string` | `maker`, `taker`, `liquidation`, `assignor`, `assignee`, etc. |
+| `cliOrdId` | `string \| null` | Client order ID if provided |
+
+<Tabs>
+  <Tab title="Recent fills">
+    ```typescript
+    const response = await client.getFills();
+
+    for (const fill of response.fills) {
+      console.log(fill.symbol, fill.side, fill.size, '@', fill.price);
+      console.log('  Fill type:', fill.fillType);
+      console.log('  Order ID:', fill.order_id);
+    }
+    ```
+  </Tab>
+  <Tab title="Historical fills">
+    ```typescript
+    // Get fills from 24 hours ago
+    const response = await client.getFills({
+      lastFillTime: new Date(Date.now() - 86400000).toISOString(),
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### `getExecutionEvents(params?)`
+
+Lists detailed execution events for your account using the history API. Provides richer data than `getFills()` and supports full pagination.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/executions`
+- **Auth required:** Yes
+
+<ParamField query="since" type="number">
+  Return events after this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="before" type="number">
+  Return events before this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="sort" type="'asc' | 'desc'">
+  Sort order.
+</ParamField>
+
+<ParamField query="count" type="number">
+  Number of events per page.
+</ParamField>
+
+<ParamField query="continuation_token" type="string">
+  Pagination token from a previous response.
+</ParamField>
+
+<ParamField query="tradeable" type="string">
+  Filter by symbol, e.g. `PF_ETHUSD`.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesHistoryResponse<FuturesHistoryExecutionEvent>>>`
+
+```typescript
+const response = await client.getExecutionEvents({
+  tradeable: 'PF_ETHUSD',
+  count: 50,
+  sort: 'desc',
+});
+
+console.log(`${response.len} events returned`);
+for (const element of response.elements) {
+  console.log(element.uid, element.timestamp, element.event);
+}
+
+// Paginate
+if (response.continuationToken) {
+  const next = await client.getExecutionEvents({
+    continuation_token: response.continuationToken,
+  });
+}
+```
+
+---
+
+## Orders
+
+### `getOpenOrders()`
+
+Returns all currently open orders across all futures contracts.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/openorders`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ openOrders: FuturesOpenOrder[] }>>`
+
+Each `FuturesOpenOrder` includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `order_id` | `string` | Unique order identifier |
+| `cliOrdId` | `string?` | Client-assigned order ID |
+| `status` | `'untouched' \| 'partiallyFilled'` | Fill status |
+| `side` | `'buy' \| 'sell' \| 'unknown'` | Order direction |
+| `orderType` | `'lmt' \| 'stop' \| 'take_profit' \| 'unknown'` | Order type |
+| `symbol` | `string` | Futures contract |
+| `limitPrice` | `number?` | Limit price |
+| `stopPrice` | `number?` | Stop trigger price |
+| `filledSize` | `number` | Amount already filled |
+| `unfilledSize` | `number?` | Remaining unfilled quantity |
+| `reduceOnly` | `boolean` | Whether order is reduce-only |
+| `receivedTime` | `string` | ISO 8601 timestamp when order was received |
+
+```typescript
+const response = await client.getOpenOrders();
+
+for (const order of response.openOrders) {
+  console.log(order.order_id, order.symbol, order.side, order.orderType);
+  console.log('  Limit:', order.limitPrice, '| Filled:', order.filledSize);
+}
+```
+
+---
+
+### `getOrderStatus(params)`
+
+Returns the current status of specific orders — open orders, or orders filled/cancelled within the last 5 seconds. Query by order ID array, client order ID array, or both.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/orders/status`
+- **Auth required:** Yes
+
+<ParamField body="orderIds" type="string[]">
+  Array of exchange-assigned order IDs to query.
+</ParamField>
+
+<ParamField body="cliOrdIds" type="string[]">
+  Array of client-assigned order IDs to query.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ orders: FuturesOrderStatusInfo[] }>>`
+
+```typescript
+const response = await client.getOrderStatus({
+  orderIds: ['a04d0f84-36d4-4499-8382-96fcfc3ce7aa'],
+});
+
+for (const orderInfo of response.orders) {
+  console.log(orderInfo.order.orderId, orderInfo.status, orderInfo.updateReason);
+}
+```
+
+---
+
+### `getOrderEvents(params?)`
+
+Lists the full order event history for your account — placements, cancellations, edits, rejections, and executions — with filtering by event type and symbol.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/orders`
+- **Auth required:** Yes
+
+<ParamField query="since" type="number">
+  Return events after this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="before" type="number">
+  Return events before this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="sort" type="'asc' | 'desc'">
+  Sort order.
+</ParamField>
+
+<ParamField query="count" type="number">
+  Number of events per page.
+</ParamField>
+
+<ParamField query="continuation_token" type="string">
+  Pagination token from a previous response.
+</ParamField>
+
+<ParamField query="tradeable" type="string">
+  Filter to a specific symbol.
+</ParamField>
+
+<ParamField query="opened" type="boolean">
+  Include order-opened events.
+</ParamField>
+
+<ParamField query="closed" type="boolean">
+  Include order-closed events.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesHistoryResponse<FuturesHistoryOrderEvent>>>`
+
+```typescript
+// Get the 50 most recent order events, newest first
+const response = await client.getOrderEvents({
+  count: 50,
+  sort: 'desc',
+  opened: true,
+  closed: true,
+});
+
+// Filter by symbol
+const ethEvents = await client.getOrderEvents({
+  tradeable: 'PF_ETHUSD',
+  count: 50,
+});
+```
+
+---
+
+### `getTriggerEvents(params?)`
+
+Lists trigger order events — placements, cancellations, and rejections of stop, take-profit, and trailing-stop triggers.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/triggers`
+- **Auth required:** Yes
+
+Accepts the same parameters as `getOrderEvents()` (including `opened`, `closed`, `since`, `before`, `count`, `sort`, `continuation_token`, `tradeable`).
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesHistoryResponse<FuturesHistoryTriggerEvent>>>`
+
+```typescript
+const response = await client.getTriggerEvents({
+  count: 50,
+  sort: 'desc',
+});
+```
+
+---
+
+## Preferences
+
+### `getLeverageSettings()`
+
+Returns the configured leverage preferences for all futures contracts — showing max leverage per symbol and whether isolated or cross margin is in effect.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/leveragepreferences`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ leveragePreferences: FuturesLeveragePreference[] }>>`
+
+```typescript
+const response = await client.getLeverageSettings();
+
+for (const pref of response.leveragePreferences) {
+  console.log(pref.symbol, 'max leverage:', pref.maxLeverage);
+}
+```
+
+---
+
+### `setLeverageSettings(params)`
+
+Sets the leverage preference for a contract. Specifying a `maxLeverage` sets the contract to isolated margin mode with that leverage cap. Omitting `maxLeverage` sets it to cross margin.
+
+- **HTTP method:** `PUT`
+- **Endpoint:** `derivatives/api/v3/leveragepreferences`
+- **Auth required:** Yes
+
+<ParamField query="symbol" type="string" required>
+  The futures symbol to configure, e.g. `PF_ETHUSD`.
+</ParamField>
+
+<ParamField query="maxLeverage" type="number">
+  Maximum leverage multiplier. Omit for cross margin mode.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<Record<string, never>>>`
+
+```typescript
+// Set 10x isolated margin on PF_ETHUSD
+await client.setLeverageSettings({
+  symbol: 'PF_ETHUSD',
+  maxLeverage: 10,
+});
+
+// Switch to cross margin
+await client.setLeverageSettings({
+  symbol: 'PF_ETHUSD',
+});
+```
+
+---
+
+### `getPnlPreferences()`
+
+Returns the PnL currency preferences per contract — the currency used to pay out realised gains on multi-collateral futures.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/pnlpreferences`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ preferences: FuturesPnlPreference[] }>>`
+
+```typescript
+const response = await client.getPnlPreferences();
+
+for (const pref of response.preferences) {
+  console.log(pref.symbol, 'PnL currency:', pref.pnlCurrency);
+}
+```
+
+---
+
+### `setPnlPreference(params)`
+
+Sets the PnL currency for a specific multi-collateral futures contract.
+
+- **HTTP method:** `PUT`
+- **Endpoint:** `derivatives/api/v3/pnlpreferences`
+- **Auth required:** Yes
+
+<ParamField query="symbol" type="string" required>
+  The multi-collateral futures symbol to configure.
+</ParamField>
+
+<ParamField query="pnlPreference" type="string" required>
+  The currency to use for PnL payouts, e.g. `USD`, `USDT`, `BTC`, `ETH`.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<Record<string, never>>>`
+
+Possible errors: `87` (contract not found), `88` (not a multi-collateral contract), `89` (currency not found), `90` (currency not enabled for multi-collateral), `41` (would cause liquidation).
+
+```typescript
+await client.setPnlPreference({
+  symbol: 'PF_BTCUSD',
+  pnlPreference: 'USDT',
+});
+```
+
+---
+
+### `getSelfTradeStrategy()`
+
+Returns the account-wide self-trade prevention strategy currently configured.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/self-trade-strategy`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ strategy: FuturesSelfTradeStrategy }>>`
+
+```typescript
+const response = await client.getSelfTradeStrategy();
+console.log(response.strategy);
+// "REJECT_TAKER" | "CANCEL_MAKER_SELF" | "CANCEL_MAKER_CHILD" | "CANCEL_MAKER_ANY"
+```
+
+---
+
+### `updateSelfTradeStrategy(params)`
+
+Updates the account-wide self-trade prevention strategy.
+
+- **HTTP method:** `PUT`
+- **Endpoint:** `derivatives/api/v3/self-trade-strategy`
+- **Auth required:** Yes
+
+<ParamField query="strategy" type="string" required>
+  One of: `REJECT_TAKER`, `CANCEL_MAKER_SELF`, `CANCEL_MAKER_CHILD`, `CANCEL_MAKER_ANY`.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ strategy: FuturesSelfTradeStrategy }>>`
+
+| Strategy | Behaviour |
+|----------|-----------|
+| `REJECT_TAKER` | The incoming taker order is rejected if it would match a maker order from the same account |
+| `CANCEL_MAKER_SELF` | The resting maker order from the same API key is cancelled |
+| `CANCEL_MAKER_CHILD` | The resting maker from any key on the same account is cancelled |
+| `CANCEL_MAKER_ANY` | Any resting maker that would self-trade is cancelled |
+
+```typescript
+const response = await client.updateSelfTradeStrategy({
+  strategy: 'CANCEL_MAKER_SELF',
+});
+console.log('Updated strategy:', response.strategy);
+```
+
+---
+
+## Subaccounts
+
+### `getSubaccounts()`
+
+Returns information about all subaccounts under the master account, including balances and UIDs.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/subaccounts`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesSubaccountsInfo>>`
+
+```typescript
+const info = await client.getSubaccounts();
+
+console.log('Master UID:', info.masterAccountUid);
+for (const sub of info.subaccounts) {
+  console.log(sub.accountUid, sub.email);
+  console.log('  Flex margin equity:', sub.flexAccount.marginEquity);
+}
+```
+
+---
+
+### `getSubaccountTradingStatus(params)`
+
+Returns trading capability information for a specific subaccount.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/subaccount/{subaccountUid}/trading-enabled`
+- **Auth required:** Yes
+
+<ParamField path="subaccountUid" type="string" required>
+  The UID of the subaccount to query.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ tradingEnabled: boolean }>>`
+
+```typescript
+const status = await client.getSubaccountTradingStatus({
+  subaccountUid: '6e5378ff-31ce-44e8-929f-23f822aa5673',
+});
+console.log('Trading enabled:', status.tradingEnabled);
+```
+
+---
+
+### `updateSubaccountTradingStatus(params)`
+
+Enables or disables trading capabilities for a specific subaccount.
+
+- **HTTP method:** `PUT`
+- **Endpoint:** `derivatives/api/v3/subaccount/{subaccountUid}/trading-enabled`
+- **Auth required:** Yes
+
+<ParamField path="subaccountUid" type="string" required>
+  The UID of the subaccount to update.
+</ParamField>
+
+<ParamField query="tradingEnabled" type="boolean" required>
+  `true` to enable trading, `false` to disable.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ tradingEnabled: boolean }>>`
+
+```typescript
+// Enable trading for a subaccount
+await client.updateSubaccountTradingStatus({
+  subaccountUid: '6e5378ff-31ce-44e8-929f-23f822aa5673',
+  tradingEnabled: true,
+});
+
+// Disable trading
+await client.updateSubaccountTradingStatus({
+  subaccountUid: '6e5378ff-31ce-44e8-929f-23f822aa5673',
+  tradingEnabled: false,
+});
+```
+
+---
+
+## Common Flows
+
+<CodeGroup>
+  ```typescript Account Summary
+  import { DerivativesClient } from '@siebly/kraken-api';
+
+  const client = new DerivativesClient({
+    apiKey: process.env.API_FUTURES_KEY,
+    apiSecret: process.env.API_FUTURES_SECRET,
+  });
+
+  async function accountSummary() {
+    const [accounts, positions, fills] = await Promise.all([
+      client.getAccounts(),
+      client.getOpenPositions(),
+      client.getFills(),
+    ]);
+
+    const flex = accounts.accounts.flex;
+    console.log('=== Account Summary ===');
+    if (flex) {
+      console.log('Portfolio value:', flex.portfolioValue);
+      console.log('Available margin:', flex.available);
+      console.log('Unrealised PnL:', flex.pnl);
+    }
+
+    console.log('\n=== Open Positions ===');
+    for (const pos of positions.openPositions) {
+      console.log(`${pos.symbol} ${pos.side} ${pos.size} @ ${pos.price}`);
+    }
+
+    console.log('\n=== Recent Fills ===');
+    for (const fill of fills.fills.slice(0, 5)) {
+      console.log(`${fill.symbol} ${fill.side} ${fill.size} @ ${fill.price}`);
+    }
+  }
+
+  accountSummary();
+  ```
+
+  ```typescript Order History Pagination
+  import { DerivativesClient } from '@siebly/kraken-api';
+
+  const client = new DerivativesClient({
+    apiKey: process.env.API_FUTURES_KEY,
+    apiSecret: process.env.API_FUTURES_SECRET,
+  });
+
+  async function fetchAllOrderEvents(symbol: string) {
+    const allEvents: any[] = [];
+    let continuationToken: string | undefined;
+
+    do {
+      const response = await client.getOrderEvents({
+        tradeable: symbol,
+        count: 100,
+        sort: 'desc',
+        continuation_token: continuationToken,
+      });
+
+      allEvents.push(...response.elements);
+      continuationToken = response.continuationToken;
+    } while (continuationToken);
+
+    console.log(`Fetched ${allEvents.length} total order events for ${symbol}`);
+    return allEvents;
+  }
+
+  fetchAllOrderEvents('PF_ETHUSD');
+  ```
+</CodeGroup>

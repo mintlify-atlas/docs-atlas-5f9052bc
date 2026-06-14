@@ -1,0 +1,351 @@
+---
+title: "PartnerClient: Embedded Finance and Ramp APIs"
+sidebarTitle: "Partner Client"
+description: "PartnerClient provides access to Kraken's embedded finance APIs — user management, portfolio tracking, quote execution, earn products, and crypto ramp — for partner integrations."
+---
+
+`PartnerClient` is the SDK client for Kraken's [Embed API](https://docs.kraken.com/api/docs/embed-api) and [Ramp API](https://docs.kraken.com/api/docs/ramp-api). It is designed for technology partners — fintechs, neobanks, brokerages, and payment platforms — that embed Kraken's crypto infrastructure into their own products under a white-label or co-branded model. All requests are routed to `https://embed.kraken.com`.
+
+<Note>
+  `PartnerClient` requires a signed partner agreement with Kraken. Standard retail or institutional accounts cannot access these endpoints. Contact [Kraken Business Development](https://www.kraken.com/en-us/partner) to apply.
+</Note>
+
+---
+
+## Constructor
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.API_PARTNER_KEY,
+  apiSecret: process.env.API_PARTNER_SECRET,
+});
+```
+
+All `PartnerClient` methods are authenticated. There are no unauthenticated public endpoints on this client.
+
+---
+
+## User Management
+
+Partners manage end-user accounts through the Embed API. Each user is identified by a `user` identifier (returned at creation) that is scoped to the partner's account.
+
+| Method | Description |
+|---|---|
+| `createEmbedUser(params)` | Create a new end-user in the Kraken system under the partner's account. |
+| `getEmbedUser(params)` | Retrieve a previously created user's profile and status. |
+| `updateEmbedUser(params)` | Update an existing user's profile fields. |
+| `submitEmbedVerification(params)` | Submit KYC/AML verification documents and details for a user. Uses `multipart/form-data` for file uploads. |
+
+---
+
+## Portfolio & Trading
+
+| Method | Description |
+|---|---|
+| `getEmbedPortfolioSummary(params)` | Get the portfolio summary (total value, allocation breakdown) for a specific user. |
+| `getEmbedPortfolioHistory(params)` | Get historical portfolio balances and valuations over time for a user. Balance for the last day reflects UTC+5h due to processing. |
+| `listEmbedPortfolioDetails(params)` | List all assets held in a user's portfolio with quantities and valuations. |
+| `listEmbedPortfolioTransactions(params)` | List a user's trade and transaction history. |
+| `requestEmbedQuote(params)` | Request a price quote for an asset pair that can be executed later. |
+| `getEmbedQuote(params)` | Retrieve the status of a previously requested quote. |
+| `executeEmbedQuote(params)` | Execute a previously requested and still-valid quote. |
+| `getEmbedQuoteLimits(params)` | Retrieve minimum, maximum, and precision constraints for a given asset pair. |
+| `requestEmbedProspectiveQuote(params)` | Request an indicative (non-binding) quote to preview price and fees before creating a firm quote. |
+| `listEmbedAssets(params?)` | List all assets available on the platform. |
+| `getEmbedAsset(params)` | Get detailed information about a specific asset. |
+| `listEmbedAssetRates(params)` | Retrieve historical median price rates for an asset. |
+
+---
+
+## Earn
+
+| Method | Description |
+|---|---|
+| `getEmbedEarnSummary(params)` | Get a user's Earn summary — all-time totals. For per-asset granularity, use `listEmbedEarnAssets()`. |
+| `listEmbedEarnAssets(params?)` | List Earn-eligible assets and, if a `user` is provided, their active allocations. |
+| `toggleEmbedAutoEarn(params)` | Enable or disable Auto-Earn for a user. This is an async operation — poll `getEmbedEarnSummary()` to check the updated status. |
+
+---
+
+## Custom Orders
+
+Custom orders allow partners to submit price-triggered or condition-based orders on behalf of their end users.
+
+| Method | Description |
+|---|---|
+| `createEmbedCustomOrder(params)` | Submit a custom order with a specified trigger condition (e.g. price-triggered). |
+| `getEmbedCustomOrder(params)` | Retrieve a single custom order by its ID. |
+| `listEmbedCustomOrders(params)` | List custom orders that were previously submitted, with optional filtering. |
+| `cancelEmbedCustomOrder(params)` | Cancel a custom order that has been submitted but not yet completed. |
+
+---
+
+## Transfers & Reporting
+
+| Method | Description |
+|---|---|
+| `withdrawEmbedFunds(params)` | Initiate a withdrawal. Currently a master-only operation (no per-user scope). |
+| `listEmbedFundingTransactions(params)` | List funding transactions (deposits and withdrawals). Currently a master-only operation. |
+| `listEmbedSettlementReports(params?)` | List settlement reports available to the master user with optional date and type filters. |
+| `getEmbedSettlementReport(params)` | Retrieve a settlement report and obtain a secure download URL. |
+
+---
+
+## Ramp
+
+The Ramp API enables partners to offer fiat-to-crypto on-ramps to their users through a hosted checkout flow.
+
+**Supported Options**
+
+| Method | Description |
+|---|---|
+| `listRampBuyCryptoAssets()` | List all cryptocurrency assets available for Ramp buy transactions, including supported networks and withdrawal methods. |
+| `listRampFiatCurrencies()` | List fiat currencies supported for funding Ramp transactions. |
+| `listRampPaymentMethods()` | List fiat payment methods (e.g. card, bank transfer) supported for Ramp deposits. |
+| `listRampCountries()` | List countries and regions where Ramp is available. Availability may be scoped to specific states or provinces. |
+
+**Quotes & Checkout**
+
+| Method | Description |
+|---|---|
+| `getRampLimits(params)` | Retrieve the combined minimum and maximum transaction limits for a given Ramp configuration. |
+| `getRampProspectiveQuote(params)` | Preview spend/receive amounts for a Ramp transaction without reserving liquidity. Use before generating a checkout URL. |
+| `getRampCheckoutUrl(params)` | Generate a hosted Ramp checkout URL for the provided transaction configuration. The response echoes the submitted parameters for confirmation. |
+
+---
+
+## Usage Examples
+
+### User Lifecycle
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.API_PARTNER_KEY,
+  apiSecret: process.env.API_PARTNER_SECRET,
+});
+
+// Create a new end-user
+const newUser = await client.createEmbedUser({
+  email: 'user@example.com',
+  country: 'US',
+  // additional KYC fields as required by your partner agreement
+});
+console.log('Created User:', JSON.stringify(newUser, null, 2));
+
+const userId = newUser.result.user;
+
+// Retrieve the user
+const user = await client.getEmbedUser({ user: userId });
+console.log('User:', JSON.stringify(user, null, 2));
+
+// Update the user's profile
+await client.updateEmbedUser({
+  user: userId,
+  // fields to update
+});
+
+// Submit KYC verification (multipart/form-data for file uploads)
+const verification = await client.submitEmbedVerification({
+  user: userId,
+  // verification documents and metadata
+});
+console.log('Verification:', JSON.stringify(verification, null, 2));
+```
+
+### Portfolio & Quote Execution
+
+<CodeGroup>
+```typescript Portfolio summary & history
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.API_PARTNER_KEY,
+  apiSecret: process.env.API_PARTNER_SECRET,
+});
+
+const userId = 'your-user-id';
+
+// Portfolio summary (total value, breakdown by asset)
+const summary = await client.getEmbedPortfolioSummary({ user: userId });
+console.log('Portfolio Summary:', JSON.stringify(summary, null, 2));
+
+// Historical portfolio valuations
+const history = await client.getEmbedPortfolioHistory({
+  user: userId,
+  // optional: from/to date range
+});
+console.log('Portfolio History:', JSON.stringify(history, null, 2));
+
+// Individual asset holdings
+const details = await client.listEmbedPortfolioDetails({ user: userId });
+console.log('Portfolio Details:', JSON.stringify(details, null, 2));
+
+// Transaction history
+const transactions = await client.listEmbedPortfolioTransactions({ user: userId });
+console.log('Transactions:', JSON.stringify(transactions, null, 2));
+```
+
+```typescript Quote request & execution
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.API_PARTNER_KEY,
+  apiSecret: process.env.API_PARTNER_SECRET,
+});
+
+const userId = 'your-user-id';
+
+// Get quote limits for an asset pair
+const limits = await client.getEmbedQuoteLimits({
+  base_asset: 'BTC',
+  quote_asset: 'USD',
+  side: 'buy',
+});
+console.log('Quote Limits:', JSON.stringify(limits, null, 2));
+
+// Request an indicative quote (no liquidity reservation)
+const indicative = await client.requestEmbedProspectiveQuote({
+  user: userId,
+  base_asset: 'BTC',
+  quote_asset: 'USD',
+  side: 'buy',
+  base_qty: '0.01',
+});
+console.log('Indicative Quote:', JSON.stringify(indicative, null, 2));
+
+// Request a firm, executable quote
+const quote = await client.requestEmbedQuote({
+  user: userId,
+  base_asset: 'BTC',
+  quote_asset: 'USD',
+  side: 'buy',
+  base_qty: '0.01',
+});
+console.log('Quote:', JSON.stringify(quote, null, 2));
+
+const quoteId = quote.result.quote_id;
+
+// Check quote status
+const quoteStatus = await client.getEmbedQuote({ quote_id: quoteId, user: userId });
+console.log('Quote Status:', JSON.stringify(quoteStatus, null, 2));
+
+// Execute the quote
+const execution = await client.executeEmbedQuote({ quote_id: quoteId, user: userId });
+console.log('Execution:', JSON.stringify(execution, null, 2));
+```
+</CodeGroup>
+
+### Earn
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.API_PARTNER_KEY,
+  apiSecret: process.env.API_PARTNER_SECRET,
+});
+
+const userId = 'your-user-id';
+
+// Get Earn summary for a user (all-time totals)
+const earnSummary = await client.getEmbedEarnSummary({ user: userId });
+console.log('Earn Summary:', JSON.stringify(earnSummary, null, 2));
+
+// List Earn-eligible assets with user's current allocations
+const earnAssets = await client.listEmbedEarnAssets({ user: userId });
+console.log('Earn Assets:', JSON.stringify(earnAssets, null, 2));
+
+// Toggle Auto-Earn on (async — poll getEmbedEarnSummary for status update)
+await client.toggleEmbedAutoEarn({
+  user: userId,
+  enabled: true,
+});
+```
+
+### Custom Orders
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.API_PARTNER_KEY,
+  apiSecret: process.env.API_PARTNER_SECRET,
+});
+
+const userId = 'your-user-id';
+
+// Submit a price-triggered custom order
+const customOrder = await client.createEmbedCustomOrder({
+  user: userId,
+  // order parameters (asset pair, side, amount, trigger condition)
+});
+console.log('Custom Order:', JSON.stringify(customOrder, null, 2));
+
+const orderId = customOrder.result.id;
+
+// Retrieve the order
+const order = await client.getEmbedCustomOrder({ order_id: orderId, user: userId });
+console.log('Order:', JSON.stringify(order, null, 2));
+
+// List all custom orders for a user
+const orders = await client.listEmbedCustomOrders({ user: userId });
+console.log('Orders:', JSON.stringify(orders, null, 2));
+
+// Cancel the order
+await client.cancelEmbedCustomOrder({ id: orderId, user: userId });
+console.log('Order cancelled');
+```
+
+### Ramp Checkout
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.API_PARTNER_KEY,
+  apiSecret: process.env.API_PARTNER_SECRET,
+});
+
+// Discover what's available in the Ramp product
+const cryptoAssets = await client.listRampBuyCryptoAssets();
+console.log('Buy Crypto Assets:', JSON.stringify(cryptoAssets, null, 2));
+
+const fiatCurrencies = await client.listRampFiatCurrencies();
+console.log('Fiat Currencies:', JSON.stringify(fiatCurrencies, null, 2));
+
+const countries = await client.listRampCountries();
+console.log('Supported Countries:', JSON.stringify(countries, null, 2));
+
+// Preview spend and receive amounts
+const prospectiveQuote = await client.getRampProspectiveQuote({
+  crypto_asset: 'BTC',
+  fiat_currency: 'USD',
+  fiat_amount: '100',
+  payment_method: 'card',
+});
+console.log('Prospective Quote:', JSON.stringify(prospectiveQuote, null, 2));
+
+// Generate a hosted checkout URL for the end-user
+const checkout = await client.getRampCheckoutUrl({
+  crypto_asset: 'BTC',
+  fiat_currency: 'USD',
+  fiat_amount: '100',
+  payment_method: 'card',
+  // wallet_address, redirect_url, and other required fields per agreement
+});
+console.log('Checkout URL:', checkout.result.checkout_url);
+```
+
+---
+
+## Further Reading
+
+<CardGroup cols={1}>
+  <Card title="Partner API Reference" href="/reference/partner">
+    Full parameter documentation for all Embed API and Ramp API endpoints.
+  </Card>
+</CardGroup>

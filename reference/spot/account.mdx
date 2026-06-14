@@ -1,0 +1,1014 @@
+---
+title: "Spot Account Methods — SpotClient REST Reference"
+sidebarTitle: "Account"
+description: "Reference for SpotClient private account methods: balances, trade balance, open/closed orders, positions, ledgers, trades history, and data exports."
+---
+
+All methods in this section are **private endpoints** — every call requires a valid API key and secret configured on the `SpotClient` instance. These methods give you complete visibility into your account state: balances, open and closed orders, margin positions, ledger history, trade records, and data export management.
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+```
+
+<Note>
+  **API key permissions:** Each method requires specific API key permissions. Grant only the minimum scopes needed — for read-only account inspection, enable **Query** permissions under Funds and Orders & Trades. Never enable withdrawal permissions unless required.
+</Note>
+
+---
+
+## `getAccountBalance(params?)`
+
+Retrieve all cash balances, net of pending withdrawals.
+
+**Signature**
+
+```typescript
+getAccountBalance(params?: {
+  rebase_multiplier?: 'rebased' | 'base';
+}): Promise<SpotAPISuccessResponse<SpotAccountBalance>>
+```
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral balances are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Balance` |
+| **Auth required** | Yes |
+
+**Response shape** — `Record<string, string>`
+
+Keys are asset identifiers (e.g. `"ZUSD"`, `"XXBT"`), values are string-encoded decimal balances.
+
+<Note>
+  Staking and Earn asset suffixes: `.B` — balances in new yield-bearing products, `.F` — balances earning automatically via Kraken Rewards, `.T` — tokenized assets.
+</Note>
+
+<CodeGroup>
+```typescript Get Balances
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const balances = await client.getAccountBalance();
+console.log(balances.result);
+// { ZUSD: '1500.00', XXBT: '0.05432100', ... }
+```
+</CodeGroup>
+
+---
+
+## `getExtendedBalance(params?)`
+
+Retrieve all extended account balances, including credits and held amounts. Available balance is calculated as:
+
+```
+available_balance = balance + credit - credit_used - hold_trade
+```
+
+**Signature**
+
+```typescript
+getExtendedBalance(params?: {
+  rebase_multiplier?: 'rebased' | 'base';
+}): Promise<SpotAPISuccessResponse<SpotExtendedBalance>>
+```
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral balances are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/BalanceEx` |
+| **Auth required** | Yes |
+
+**Response shape** — `Record<string, SpotExtendedBalanceAsset>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `balance` | `string` | Total balance |
+| `credit` | `string` | Available credit |
+| `credit_used` | `string` | Credit currently in use |
+| `hold_trade` | `string` | Amount held for open orders |
+
+<CodeGroup>
+```typescript Extended Balances
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const extended = await client.getExtendedBalance();
+for (const [asset, detail] of Object.entries(extended.result)) {
+  const available =
+    parseFloat(detail.balance) +
+    parseFloat(detail.credit) -
+    parseFloat(detail.credit_used) -
+    parseFloat(detail.hold_trade);
+  console.log(`${asset}: available = ${available}`);
+}
+```
+</CodeGroup>
+
+---
+
+## `getTradeBalance(params?)`
+
+Retrieve a summary of collateral balances, margin position valuations, equity and margin level.
+
+**Signature**
+
+```typescript
+getTradeBalance(params?: {
+  rebase_multiplier?: 'rebased' | 'base';
+}): Promise<SpotAPISuccessResponse<SpotTradeBalance>>
+```
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral balances are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/TradeBalance` |
+| **Auth required** | Yes |
+
+**Response fields** — `SpotTradeBalance`
+
+| Field | Description |
+|-------|-------------|
+| `eb` | Equivalent balance (combined balance of all currencies) |
+| `tb` | Trade balance (combined balance of all equity currencies) |
+| `m` | Margin amount of open positions |
+| `n` | Unrealized net profit/loss of open positions |
+| `c` | Cost basis of open positions |
+| `v` | Current floating valuation of open positions |
+| `e` | Equity: `trade_balance + unrealized_net_pnl` |
+| `mf` | Free margin: `equity - initial_margin` |
+| `ml` | Margin level: `(equity / initial_margin) × 100` |
+| `uv` | Unexecuted value |
+
+<CodeGroup>
+```typescript Trade Balance
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const tradeBalance = await client.getTradeBalance();
+console.log('Equity:', tradeBalance.result.e);
+console.log('Free margin:', tradeBalance.result.mf);
+console.log('Margin level:', tradeBalance.result.ml);
+```
+</CodeGroup>
+
+---
+
+## `getOpenOrders(params?)`
+
+Retrieve information about currently open orders.
+
+**Signature**
+
+```typescript
+getOpenOrders(
+  params?: SpotGetOpenOrdersParams
+): Promise<SpotAPISuccessResponse<SpotOpenOrdersResponse>>
+```
+
+<ParamField body="trades" type="boolean">
+  Whether to include trades related to a position in the output. Defaults to `false`.
+</ParamField>
+
+<ParamField body="userref" type="number">
+  Filter by user reference ID.
+</ParamField>
+
+<ParamField body="cl_ord_id" type="string">
+  Filter by client order ID.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/OpenOrders` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript All Open Orders
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const openOrders = await client.getOpenOrders();
+for (const [txid, order] of Object.entries(openOrders.result.open)) {
+  console.log(`${txid}: ${order.descr.order}`);
+}
+```
+
+```typescript Filter by Client Order ID
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const orders = await client.getOpenOrders({
+  cl_ord_id: '9cc788d8-9c00-4b25-94d3-26d93603948d',
+  trades: true,
+});
+console.log(orders.result.open);
+```
+</CodeGroup>
+
+---
+
+## `getClosedOrders(params?)`
+
+Retrieve information about orders that have been closed (filled or cancelled). Returns 50 results at a time, most recent first.
+
+**Signature**
+
+```typescript
+getClosedOrders(
+  params?: SpotGetClosedOrdersParams
+): Promise<SpotAPISuccessResponse<SpotClosedOrdersResponse>>
+```
+
+<ParamField body="trades" type="boolean">
+  Whether to include related trades in the output.
+</ParamField>
+
+<ParamField body="userref" type="number">
+  Filter by user reference ID.
+</ParamField>
+
+<ParamField body="cl_ord_id" type="string">
+  Filter by client order ID.
+</ParamField>
+
+<ParamField body="start" type="number">
+  Unix timestamp or order transaction ID to begin results from (inclusive).
+</ParamField>
+
+<ParamField body="end" type="number">
+  Unix timestamp or order transaction ID to end results at (inclusive).
+</ParamField>
+
+<ParamField body="ofs" type="number">
+  Result offset for pagination.
+</ParamField>
+
+<ParamField body="closetime" type="'open' | 'close' | 'both'">
+  Whether to search by open time, close time, or both. Defaults to `both`.
+</ParamField>
+
+<ParamField body="consolidate_taker" type="boolean">
+  Whether to consolidate trades by taker.
+</ParamField>
+
+<ParamField body="without_count" type="boolean">
+  If `true`, omits the `count` field from the response for a minor performance improvement.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/ClosedOrders` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Closed Orders (Last 50)
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const closed = await client.getClosedOrders();
+console.log('Total count:', closed.result.count);
+console.log('Orders:', closed.result.closed);
+```
+
+```typescript Filtered by Date Range
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const sevenDaysAgo = Math.floor(Date.now() / 1000) - 86400 * 7;
+
+const closed = await client.getClosedOrders({
+  trades: true,
+  start: sevenDaysAgo,
+  closetime: 'close',
+});
+console.log(closed.result.closed);
+```
+</CodeGroup>
+
+---
+
+## `getOrders(params)`
+
+Retrieve information about one or more specific orders by transaction ID.
+
+**Signature**
+
+```typescript
+getOrders(
+  params: SpotQueryOrdersParams
+): Promise<SpotAPISuccessResponse<SpotQueryOrdersResponse>>
+```
+
+<ParamField body="txid" type="string" required>
+  Comma-delimited list of transaction IDs to query (up to 50).
+</ParamField>
+
+<ParamField body="trades" type="boolean">
+  Whether to include related trades in output.
+</ParamField>
+
+<ParamField body="userref" type="number">
+  Filter by user reference ID.
+</ParamField>
+
+<ParamField body="consolidate_taker" type="boolean">
+  Whether to consolidate trades by taker.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/QueryOrders` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Query Specific Orders
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const orders = await client.getOrders({
+  txid: 'OQCLML-BW3P3-BUCMWZ,OZNOZE-2DOVH-Q4DOQT',
+  trades: true,
+});
+console.log(orders.result);
+```
+</CodeGroup>
+
+---
+
+## `getOrderAmends(params)`
+
+Retrieves an audit trail of all amend transactions on a specific order, ordered by ascending amend timestamp.
+
+**Signature**
+
+```typescript
+getOrderAmends(params: {
+  order_id: string;
+  rebase_multiplier?: 'rebased' | 'base';
+}): Promise<SpotAPISuccessResponse<SpotOrderAmendsResponse>>
+```
+
+<ParamField body="order_id" type="string" required>
+  The Kraken transaction ID of the order to inspect.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/OrderAmends` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotOrderAmendsResponse`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `count` | `number` | Total number of amends |
+| `amends` | `SpotOrderAmend[]` | List of amend records |
+
+Each `SpotOrderAmend` includes: `amend_id`, `amend_type` (`'original' \| 'user' \| 'restated'`), `order_qty`, `limit_price`, `trigger_price`, `reason`, `post_only`, `timestamp`.
+
+<CodeGroup>
+```typescript Get Order Amend History
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const amends = await client.getOrderAmends({
+  order_id: 'OQCLML-BW3P3-BUCMWZ',
+});
+console.log(`Total amends: ${amends.result.count}`);
+amends.result.amends.forEach((a) => {
+  console.log(`${a.amend_type} at ${a.timestamp}: qty=${a.order_qty} price=${a.limit_price}`);
+});
+```
+</CodeGroup>
+
+---
+
+## `getTradesHistory(params?)`
+
+Retrieve information about trades/fills. Returns 50 results at a time, most recent first.
+
+**Signature**
+
+```typescript
+getTradesHistory(
+  params?: SpotGetTradesHistoryParams
+): Promise<SpotAPISuccessResponse<SpotTradesHistoryResponse>>
+```
+
+<ParamField body="type" type="'all' | 'any position' | 'closed position' | 'closing position' | 'no position'">
+  Type of trade to filter by. Defaults to `all`.
+</ParamField>
+
+<ParamField body="trades" type="boolean">
+  Whether to include trades related to a position.
+</ParamField>
+
+<ParamField body="start" type="number">
+  Unix timestamp or trade transaction ID to begin results from (inclusive).
+</ParamField>
+
+<ParamField body="end" type="number">
+  Unix timestamp or trade transaction ID to end results at (inclusive).
+</ParamField>
+
+<ParamField body="ofs" type="number">
+  Result offset for pagination.
+</ParamField>
+
+<ParamField body="consolidate_taker" type="boolean">
+  Whether to consolidate trades by taker.
+</ParamField>
+
+<ParamField body="ledgers" type="boolean">
+  Whether to include ledger entries associated with trades.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/TradesHistory` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Recent Trades History
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const history = await client.getTradesHistory();
+console.log(`Total trades: ${history.result.count}`);
+console.log(history.result.trades);
+```
+
+```typescript Paginate Through History
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Page 1 (offset 0)
+const page1 = await client.getTradesHistory({ ofs: 0 });
+// Page 2 (offset 50)
+const page2 = await client.getTradesHistory({ ofs: 50 });
+```
+</CodeGroup>
+
+---
+
+## `getTrades(params)`
+
+Retrieve information about one or more specific trades by transaction ID.
+
+**Signature**
+
+```typescript
+getTrades(
+  params: SpotQueryTradesParams
+): Promise<SpotAPISuccessResponse<SpotQueryTradesResponse>>
+```
+
+<ParamField body="txid" type="string" required>
+  Comma-delimited list of transaction IDs to query (up to 20).
+</ParamField>
+
+<ParamField body="trades" type="boolean">
+  Whether to include trades related to a position.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/QueryTrades` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Query Specific Trades
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const trades = await client.getTrades({
+  txid: 'TI3ZBU-OGPJK-SDTMFT',
+  trades: true,
+});
+console.log(trades.result);
+```
+</CodeGroup>
+
+---
+
+## `getOpenPositions(params?)`
+
+Get information about open margin positions.
+
+**Signature**
+
+```typescript
+getOpenPositions(
+  params?: SpotGetOpenPositionsParams
+): Promise<SpotAPISuccessResponse<SpotOpenPositionsResponse>>
+```
+
+<ParamField body="txid" type="string">
+  Comma-delimited list of transaction IDs to filter by.
+</ParamField>
+
+<ParamField body="docalcs" type="boolean">
+  Whether to include profit/loss calculations. Defaults to `false`.
+</ParamField>
+
+<ParamField body="consolidation" type="'market'">
+  Consolidate positions by market/pair.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/OpenPositions` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Open Positions with P&L
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const positions = await client.getOpenPositions({ docalcs: true });
+for (const [posId, pos] of Object.entries(positions.result)) {
+  console.log(`${posId}: ${pos.pair} ${pos.type} — net=${pos.net}`);
+}
+```
+</CodeGroup>
+
+---
+
+## `getLedgersInfo(params?)`
+
+Retrieve information about ledger entries. Returns 50 results at a time, most recent first.
+
+**Signature**
+
+```typescript
+getLedgersInfo(
+  params?: SpotGetLedgersInfoParams
+): Promise<SpotAPISuccessResponse<SpotLedgersInfoResponse>>
+```
+
+<ParamField body="asset" type="string">
+  Comma-delimited list of assets to filter by (e.g. `"XBT,ETH"`).
+</ParamField>
+
+<ParamField body="aclass" type="string">
+  Asset class to filter by.
+</ParamField>
+
+<ParamField body="type" type="string">
+  Ledger entry type filter. Options: `all`, `trade`, `deposit`, `withdrawal`, `transfer`, `margin`, `adjustment`, `rollover`, `credit`, `settled`, `staking`, `dividend`, `sale`, `nft_rebate`.
+</ParamField>
+
+<ParamField body="start" type="number">
+  Unix timestamp to begin results from (inclusive).
+</ParamField>
+
+<ParamField body="end" type="number">
+  Unix timestamp to end results at (inclusive).
+</ParamField>
+
+<ParamField body="ofs" type="number">
+  Result offset for pagination.
+</ParamField>
+
+<ParamField body="without_count" type="boolean">
+  If `true`, omits the `count` field from the response.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Ledgers` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Deposit Ledger Entries
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const ledgers = await client.getLedgersInfo({
+  asset: 'XBT',
+  type: 'deposit',
+});
+console.log(`Total entries: ${ledgers.result.count}`);
+console.log(ledgers.result.ledger);
+```
+</CodeGroup>
+
+---
+
+## `getLedgers(params)`
+
+Retrieve information about specific ledger entries by ID.
+
+**Signature**
+
+```typescript
+getLedgers(
+  params: SpotQueryLedgersParams
+): Promise<SpotAPISuccessResponse<SpotQueryLedgersResponse>>
+```
+
+<ParamField body="id" type="string" required>
+  Comma-delimited list of ledger entry IDs to query (up to 20).
+</ParamField>
+
+<ParamField body="trades" type="boolean">
+  Whether to include trades related to the ledger entries.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/QueryLedgers` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Query Ledger Entries
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const entries = await client.getLedgers({
+  id: 'LUI2RA-CJFLB-EN5I4P,L2QE42-IGSZ3-WEVTLK',
+  trades: false,
+});
+console.log(entries.result);
+```
+</CodeGroup>
+
+---
+
+## `getTradingVolume(params?)`
+
+Returns 30-day USD trading volume and resulting fee schedule for any asset pair(s) provided. Also use this endpoint (with a Spot API key) to determine Futures fee rates.
+
+**Signature**
+
+```typescript
+getTradingVolume(params?: {
+  pair?: string;
+  rebase_multiplier?: 'rebased' | 'base';
+}): Promise<SpotAPISuccessResponse<SpotTradeVolume>>
+```
+
+<ParamField body="pair" type="string">
+  Comma-delimited list of pairs to return fee info for (e.g. `"XBTUSD,ETHUSD"`).
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/TradeVolume` |
+| **Auth required** | Yes |
+
+**Response fields** — `SpotTradeVolume`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `currency` | `string` | Volume currency (USD) |
+| `volume` | `string` | Current 30-day trading volume |
+| `fees` | `Record<string, SpotFeeTierInfo>?` | Taker fee schedule by pair |
+| `fees_maker` | `Record<string, SpotFeeTierInfo>?` | Maker fee schedule by pair |
+
+<CodeGroup>
+```typescript Trading Volume and Fees
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const volume = await client.getTradingVolume({ pair: 'XBTUSD,ETHUSD' });
+console.log('30-day volume:', volume.result.volume, volume.result.currency);
+console.log('XBTUSD taker fee:', volume.result.fees?.['XXBTZUSD']?.fee);
+console.log('XBTUSD maker fee:', volume.result.fees_maker?.['XXBTZUSD']?.fee);
+```
+</CodeGroup>
+
+---
+
+## `requestLedgersExport(params)`
+
+Request an export of trades or ledger data as a CSV or TSV file.
+
+**Signature**
+
+```typescript
+requestLedgersExport(
+  params: SpotRequestExportReportParams
+): Promise<SpotAPISuccessResponse<SpotRequestExportReportResponse>>
+```
+
+<ParamField body="report" type="'trades' | 'ledgers'" required>
+  Type of data to export.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Description/label for the export.
+</ParamField>
+
+<ParamField body="format" type="'CSV' | 'TSV'">
+  Export file format. Defaults to `CSV`.
+</ParamField>
+
+<ParamField body="fields" type="string">
+  Comma-delimited list of fields to include in the export.
+</ParamField>
+
+<ParamField body="starttm" type="number">
+  Start time for data range (Unix timestamp).
+</ParamField>
+
+<ParamField body="endtm" type="number">
+  End time for data range (Unix timestamp).
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/AddExport` |
+| **Auth required** | Yes |
+
+Returns `{ id: string }` — the export ID used to check status and retrieve the file.
+
+---
+
+## `getLedgersExportStatus(params)`
+
+Get the status of previously requested data exports.
+
+**Signature**
+
+```typescript
+getLedgersExportStatus(params: {
+  report: 'trades' | 'ledgers';
+}): Promise<SpotAPISuccessResponse<SpotExportReportStatus[]>>
+```
+
+<ParamField body="report" type="'trades' | 'ledgers'" required>
+  The type of report to check status for.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/ExportStatus` |
+| **Auth required** | Yes |
+
+Each `SpotExportReportStatus` includes: `id`, `descr`, `format`, `report`, `status` (`'Queued' \| 'Processing' \| 'Processed'`), `createdtm`, `completedtm`.
+
+---
+
+## `getLedgersExport(params)`
+
+Retrieve (download) a processed data export as a binary zip archive.
+
+**Signature**
+
+```typescript
+getLedgersExport(params: { id: string }): Promise<any>
+```
+
+<ParamField body="id" type="string" required>
+  The export ID returned by `requestLedgersExport()`.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/RetrieveExport` |
+| **Auth required** | Yes |
+
+<Note>
+  Only call this after `getLedgersExportStatus()` confirms the export `status` is `"Processed"`.
+</Note>
+
+---
+
+## `deleteLedgersExport(params)`
+
+Delete or cancel an exported trades/ledgers report.
+
+**Signature**
+
+```typescript
+deleteLedgersExport(params: {
+  id: string;
+  type: 'cancel' | 'delete';
+}): Promise<SpotAPISuccessResponse<SpotDeleteExportReportResponse>>
+```
+
+<ParamField body="id" type="string" required>
+  The export ID to act on.
+</ParamField>
+
+<ParamField body="type" type="'cancel' | 'delete'" required>
+  Use `cancel` for queued/processing exports; use `delete` for completed exports.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/RemoveExport` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Full Export Lifecycle
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// 1. Request the export
+const request = await client.requestLedgersExport({
+  report: 'ledgers',
+  description: 'Monthly ledger export',
+  format: 'CSV',
+});
+const exportId = request.result.id;
+console.log('Export requested:', exportId);
+
+// 2. Poll until processed
+let processed = false;
+while (!processed) {
+  await new Promise((r) => setTimeout(r, 5000)); // wait 5s
+  const statuses = await client.getLedgersExportStatus({ report: 'ledgers' });
+  const mine = statuses.result.find((s) => s.id === exportId);
+  if (mine?.status === 'Processed') processed = true;
+  console.log('Status:', mine?.status);
+}
+
+// 3. Download
+const data = await client.getLedgersExport({ id: exportId });
+
+// 4. Clean up
+await client.deleteLedgersExport({ id: exportId, type: 'delete' });
+```
+</CodeGroup>
+
+---
+
+## `getWebSocketsToken()`
+
+Request a WebSocket authentication token. Required for subscribing to private WebSocket channels. The token must be used within **15 minutes** of creation.
+
+**Signature**
+
+```typescript
+getWebSocketsToken(): Promise<SpotAPISuccessResponse<SpotWebSocketsTokenResponse>>
+```
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/GetWebSocketsToken` |
+| **Auth required** | Yes |
+
+**Response fields** — `SpotWebSocketsTokenResponse`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `token` | `string` | The WebSocket auth token |
+| `expires` | `number` | Token lifetime in seconds (900) |
+
+<CodeGroup>
+```typescript Get WebSocket Token
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const wsAuth = await client.getWebSocketsToken();
+const token = wsAuth.result.token;
+// Pass token to your WebSocket client for private channel subscriptions
+console.log('WS Token:', token);
+console.log('Expires in:', wsAuth.result.expires, 'seconds');
+```
+</CodeGroup>

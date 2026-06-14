@@ -1,0 +1,1414 @@
+---
+title: "PartnerClient: Embedded Finance API Reference"
+sidebarTitle: "Partner"
+description: "Complete method reference for PartnerClient — embedded user management, portfolio tracking, quote execution, earn products, custom orders, and ramp APIs."
+---
+
+The `PartnerClient` provides access to Kraken's white-label embedded finance APIs, enabling partners to build full-featured crypto products under their own brand. It covers the **Embed API** (`embed.kraken.com`) for user onboarding, portfolio management, trading quotes, earn products, and custom orders, as well as the **Ramp API** for fiat-to-crypto checkout flows. All requests are authenticated with partner-level API credentials and act on behalf of users identified by their IIBAN (Internet International Bank Account Number).
+
+<Note>
+  Partner API access requires a partner agreement with Kraken. Contact [Kraken](https://www.kraken.com/partner) to apply. Your partner API key and secret are separate from standard Spot or Institutional credentials.
+</Note>
+
+---
+
+## Constructor
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: 'insert_api_key_here',
+  apiSecret: 'insert_api_secret_here',
+});
+```
+
+---
+
+## User Management
+
+### `createEmbedUser`
+
+Create a new user in the Kraken embedded finance system. Returns the Kraken-assigned IIBAN for the user, which is used as the `user` parameter in all subsequent calls.
+
+```typescript
+createEmbedUser(params: PartnerCreateUserParams): Promise<PartnerCreateUserResponse>
+```
+
+**Returns:** `PartnerCreateUserResponse` — `{ result: { user: { iiban: string } } }`
+
+<ParamField body="email" type="string" required>
+  User's email address.
+</ParamField>
+
+<ParamField body="external_id" type="string" required>
+  Your system's unique identifier for this user.
+</ParamField>
+
+<ParamField body="tos_version_accepted" type="number" required>
+  Version number of the Terms of Service accepted by the user.
+</ParamField>
+
+<ParamField body="full_name" type="object" required>
+  `{ first_name: string, middle_name?: string, last_name: string }`
+</ParamField>
+
+<ParamField body="date_of_birth" type="string" required>
+  Date of birth in `YYYY-MM-DD` format.
+</ParamField>
+
+<ParamField body="residence" type="object" required>
+  Residential address: `{ line1, line2?, city, postal_code, province?, country }` (ISO 3166-1 alpha-2 country code).
+</ParamField>
+
+<ParamField body="phone" type="string" required>
+  Phone number in E.164 format (e.g. `+14155552671`).
+</ParamField>
+
+<ParamField body="nationalities" type="string[]" required>
+  Array of ISO 3166-1 alpha-2 country codes.
+</ParamField>
+
+<ParamField body="occupation" type="string" required>
+  One of: `agriculture`, `business_management`, `computers_and_it`, `construction`, `education`, `finance`, `government`, `healthcare`, `hospitality`, `manufacturing`, `marketing`, `media`, `other`, `science`, `self_employed`, `student`, `transportation`, `unemployed`.
+</ParamField>
+
+<ParamField body="tax_ids" type="array">
+  Optional tax IDs: `[{ id: string, issuing_country: string }]`.
+</ParamField>
+
+<ParamField body="language" type="string">
+  ISO 639-1 language code (e.g. `en`, `de`).
+</ParamField>
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: 'insert_api_key_here',
+  apiSecret: 'insert_api_secret_here',
+});
+
+const response = await client.createEmbedUser({
+  email: 'alice@example.com',
+  external_id: 'user_12345',
+  tos_version_accepted: 1,
+  full_name: { first_name: 'Alice', last_name: 'Smith' },
+  date_of_birth: '1990-06-15',
+  residence: {
+    line1: '123 Main St',
+    city: 'New York',
+    postal_code: '10001',
+    country: 'US',
+  },
+  phone: '+12125550100',
+  nationalities: ['US'],
+  occupation: 'finance',
+});
+const userIiban = response.result.user.iiban;
+console.log('User IIBAN:', userIiban);
+```
+
+---
+
+### `getEmbedUser`
+
+Retrieve profile and status information for a previously created user.
+
+```typescript
+getEmbedUser(params: { user: string }): Promise<PartnerGetUserResponse>
+```
+
+**Returns:** `PartnerGetUserResponse` — includes `user`, `external_id?`, `user_type`, `status`, `created_at`.
+
+```typescript
+const user = await client.getEmbedUser({ user: userIiban });
+console.log('Status:', user.result?.status.state);
+console.log('Required actions:', user.result?.status.required_actions);
+```
+
+---
+
+### `updateEmbedUser`
+
+Update an existing user's profile details such as address, phone, name, or occupation.
+
+```typescript
+updateEmbedUser(params: PartnerUpdateUserParams): Promise<PartnerUpdateUserResponse>
+```
+
+**Returns:** `PartnerUpdateUserResponse` — `{ result?: 'success' }`
+
+<ParamField body="user" type="string" required>
+  The user's IIBAN.
+</ParamField>
+
+<ParamField body="phone" type="string">
+  Updated phone in E.164 format.
+</ParamField>
+
+<ParamField body="residence" type="object">
+  Updated residential address.
+</ParamField>
+
+<ParamField body="occupation" type="string">
+  Updated occupation.
+</ParamField>
+
+```typescript
+await client.updateEmbedUser({
+  user: userIiban,
+  phone: '+12125550199',
+  occupation: 'self_employed',
+});
+```
+
+---
+
+### `submitEmbedVerification`
+
+Submit a KYC identity verification for a user, including document images and metadata from your verification provider. Uses `multipart/form-data` internally.
+
+```typescript
+submitEmbedVerification(
+  params: PartnerSubmitVerificationParams,
+): Promise<PartnerSubmitVerificationResponse>
+```
+
+**Returns:** `PartnerSubmitVerificationResponse` — `{ result?: { verification_id: string } }`
+
+<ParamField body="user" type="string" required>
+  The user's IIBAN.
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Verification type: `identity_document`.
+</ParamField>
+
+<ParamField body="metadata" type="object" required>
+  Document metadata including `identity` (name + DOB), `document_type` (`passport`, `drivers_license`, `id_card`, `residence_card`, `special_permanent_residence_card`), `document_number`, `issuing_country`, and optional `nationality`.
+</ParamField>
+
+<ParamField body="verifier" type="string" required>
+  Name of the KYC verification provider (e.g. `Onfido`).
+</ParamField>
+
+<ParamField body="verified_at" type="string" required>
+  ISO 8601 datetime when verification was completed.
+</ParamField>
+
+<ParamField body="front" type="any" required>
+  Binary file for the front side of the identity document.
+</ParamField>
+
+<ParamField body="back" type="any" required>
+  Binary file for the back side of the identity document.
+</ParamField>
+
+---
+
+## Portfolio
+
+### `getEmbedPortfolioSummary`
+
+Get the overall portfolio summary for a user: total value, available balance, open orders value, and optional current-day P&L.
+
+```typescript
+getEmbedPortfolioSummary(
+  params: PartnerGetPortfolioSummaryParams,
+): Promise<PartnerGetPortfolioSummaryResponse>
+```
+
+**Returns:** `PartnerGetPortfolioSummaryResponse` — `{ result: { timestamp, currency, portfolio_value, withheld_value, open_orders, available_balance, lots_upnl?, cost_basis?, current_day_pnl? } }`
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="quote" type="string">
+  Quote asset for valuation (default `USD`).
+</ParamField>
+
+```typescript
+const summary = await client.getEmbedPortfolioSummary({ user: userIiban });
+console.log('Portfolio value:', summary.result.portfolio_value, summary.result.currency);
+console.log('Available balance:', summary.result.available_balance);
+```
+
+---
+
+### `getEmbedPortfolioHistory`
+
+Retrieve a user's portfolio value over time, with optional asset-level breakdown and P&L.
+
+```typescript
+getEmbedPortfolioHistory(
+  params: PartnerGetPortfolioHistoryParams,
+): Promise<PartnerGetPortfolioHistoryResponse>
+```
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="start_date" type="string">
+  Start date in `YYYY-MM-DD` format.
+</ParamField>
+
+<ParamField body="end_date" type="string">
+  End date in `YYYY-MM-DD` format.
+</ParamField>
+
+<ParamField body="resolution" type="number">
+  Data point resolution in days (default `1`).
+</ParamField>
+
+<ParamField body="include[assets][]" type="string[]">
+  Include per-asset breakdown for specific assets.
+</ParamField>
+
+<ParamField body="include[total_pnl]" type="boolean">
+  Include total profit and loss figures.
+</ParamField>
+
+```typescript
+const history = await client.getEmbedPortfolioHistory({
+  user: userIiban,
+  start_date: '2025-01-01',
+  end_date: '2025-06-30',
+  'include[total_pnl]': true,
+});
+console.log('P&L:', history.result.total_pnl);
+```
+
+---
+
+### `listEmbedPortfolioDetails`
+
+List all assets currently held in a user's portfolio with per-asset balance and valuation.
+
+```typescript
+listEmbedPortfolioDetails(
+  params: PartnerListPortfolioDetailsParams,
+): Promise<PartnerListPortfolioDetailsResponse>
+```
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="quote" type="string">
+  Quote asset for valuation (default `USD`).
+</ParamField>
+
+```typescript
+const details = await client.listEmbedPortfolioDetails({ user: userIiban });
+details.result?.assets.forEach((a: any) => console.log(a.asset, a.quantity));
+```
+
+---
+
+### `listEmbedPortfolioTransactions`
+
+List a user's trade and transaction history with optional filtering by type, asset, status, and date range.
+
+```typescript
+listEmbedPortfolioTransactions(
+  params: PartnerListPortfolioTransactionsParams,
+): Promise<PartnerListPortfolioTransactionsResponse>
+```
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="types" type="string[]">
+  Filter by type: `simple_order`, `simple_order_failed`, `earn_reward`.
+</ParamField>
+
+<ParamField body="statuses" type="string[]">
+  Filter by status: `no_status`, `unspecified`, `in_progress`, `successful`, `failed`.
+</ParamField>
+
+<ParamField body="assets" type="string[]">
+  Filter by asset names (max 16 chars each).
+</ParamField>
+
+<ParamField body="from_time" type="string">
+  Start of date range (ISO 8601).
+</ParamField>
+
+<ParamField body="until_time" type="string">
+  End of date range (ISO 8601).
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from `next_cursor`.
+</ParamField>
+
+<ParamField body="page_size" type="number">
+  Number of transactions per page.
+</ParamField>
+
+```typescript
+const txs = await client.listEmbedPortfolioTransactions({
+  user: userIiban,
+  types: ['simple_order'],
+  statuses: ['successful'],
+  page_size: 25,
+});
+console.log(`Transactions: ${txs.result?.transactions.length}`);
+```
+
+---
+
+### `listEmbedFundingTransactions`
+
+List funding (deposit and withdrawal) transactions at the master account level.
+
+```typescript
+listEmbedFundingTransactions(
+  params: PartnerListFundingTransactionsParams,
+): Promise<PartnerListFundingTransactionsResponse>
+```
+
+<ParamField body="type" type="string" required>
+  Filter by `withdrawal` or `deposit`.
+</ParamField>
+
+<ParamField body="page_size" type="number">
+  Number of results per page (1–500, default 25).
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor.
+</ParamField>
+
+```typescript
+const funding = await client.listEmbedFundingTransactions({ type: 'deposit' });
+funding.result.transactions.forEach((t) => {
+  console.log(`${t.type}: ${t.amount} ${t.asset} — ${t.status}`);
+});
+```
+
+---
+
+### `withdrawEmbedFunds`
+
+Initiate a withdrawal from the master account to a pre-configured withdrawal key.
+
+<Warning>
+  This is a master-account-level operation. There is no `user` parameter — it operates on the partner's master balance, not an individual user's balance.
+</Warning>
+
+```typescript
+withdrawEmbedFunds(
+  params: PartnerWithdrawFundsParams,
+): Promise<PartnerWithdrawFundsResponse>
+```
+
+**Returns:** `PartnerWithdrawFundsResponse` — `{ result?: { reference_id: string } }`
+
+<ParamField body="asset" type="string" required>
+  Asset to withdraw (e.g. `BTC`, `USD`). Must be 3–16 characters.
+</ParamField>
+
+<ParamField body="key" type="string" required>
+  Pre-configured withdrawal key.
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to withdraw as a decimal string.
+</ParamField>
+
+```typescript
+const withdrawal = await client.withdrawEmbedFunds({
+  asset: 'ETH',
+  key: 'my-withdrawal-key',
+  amount: '1.5',
+});
+console.log('Reference ID:', withdrawal.result?.reference_id);
+```
+
+---
+
+## Quotes & Trading
+
+### `requestEmbedQuote`
+
+Request a firm, executable price quote for a currency exchange on behalf of a user. The quote expires after a short window and can be executed with `executeEmbedQuote`.
+
+```typescript
+requestEmbedQuote(
+  params: PartnerRequestQuoteParams,
+): Promise<PartnerRequestQuoteResponse>
+```
+
+**Returns:** `PartnerRequestQuoteResponse` — includes `quote_id`, `type`, `status`, `expires`, `spend`, `receive`, `unit_price`.
+
+<ParamField body="user" type="string" required>
+  User IIBAN on whose behalf the quote is requested.
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Quote type: `receive` (specify how much to receive) or `spend` (specify how much to spend).
+</ParamField>
+
+<ParamField body="amount" type="object" required>
+  Amount specification: `{ asset_class?: 'currency', asset: string, amount: string }`.
+</ParamField>
+
+<ParamField body="quote" type="object" required>
+  Quote (counter) asset: `{ asset: string }`.
+</ParamField>
+
+<ParamField body="fee_bps" type="string" required>
+  Partner fee in basis points (e.g. `"50"` for 0.5%).
+</ParamField>
+
+<ParamField body="spread_bps" type="string" required>
+  Spread in basis points.
+</ParamField>
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: 'insert_api_key_here',
+  apiSecret: 'insert_api_secret_here',
+});
+
+// Request a quote: user wants to spend 100 USD to receive BTC
+const quote = await client.requestEmbedQuote({
+  user: userIiban,
+  type: 'spend',
+  amount: {
+    asset: 'USD',
+    amount: '100',
+  },
+  quote: { asset: 'BTC' },
+  fee_bps: '50',
+  spread_bps: '20',
+});
+const quoteId = quote.result.quote_id;
+console.log('Quote ID:', quoteId, 'Expires:', quote.result.expires);
+```
+
+---
+
+### `requestEmbedProspectiveQuote`
+
+Request a prospective (indicative, non-binding) quote to preview pricing and fees before requesting a firm quote. Does not lock liquidity.
+
+```typescript
+requestEmbedProspectiveQuote(
+  params: PartnerRequestProspectiveQuoteParams,
+): Promise<PartnerRequestProspectiveQuoteResponse>
+```
+
+**Returns:** `PartnerRequestProspectiveQuoteResponse` — `{ result?: { type, spend, receive, unit_price, quoted_spend?, quoted_receive?, quoted_unit_price? } }`
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="action" type="object" required>
+  Trade action: `{ type: 'receive' | 'spend', amount: { asset, amount }, quote: { asset, fee_bps, spread_bps } }`.
+</ParamField>
+
+<ParamField body="quote_currency" type="string">
+  Optional display currency for quoted amounts.
+</ParamField>
+
+```typescript
+const prospective = await client.requestEmbedProspectiveQuote({
+  user: userIiban,
+  action: {
+    type: 'spend',
+    amount: { asset: 'USD', amount: '500' },
+    quote: { asset: 'ETH', fee_bps: '30', spread_bps: '10' },
+  },
+});
+console.log('Indicative receive:', prospective.result?.receive.total, prospective.result?.receive.asset);
+```
+
+---
+
+### `getEmbedQuote`
+
+Retrieve the current status of a previously requested quote.
+
+```typescript
+getEmbedQuote(params: PartnerGetQuoteParams): Promise<PartnerGetQuoteResponse>
+```
+
+<ParamField body="quote_id" type="string" required>
+  The quote ID returned by `requestEmbedQuote`.
+</ParamField>
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+```typescript
+const status = await client.getEmbedQuote({ quote_id: quoteId, user: userIiban });
+console.log('Quote status:', status.result?.status);
+```
+
+---
+
+### `getEmbedQuoteLimits`
+
+Retrieve the minimum, maximum, and precision constraints for a specific asset pair and trade direction. Use this to validate user input before requesting a quote.
+
+```typescript
+getEmbedQuoteLimits(
+  params: PartnerGetQuoteLimitsParams,
+): Promise<PartnerGetQuoteLimitsResponse>
+```
+
+**Returns:** `PartnerGetQuoteLimitsResponse` — `{ result?: { asset, minimum, maximum, precision, minimum_tradable_amount?, minimum_in_display?, maximum_in_display? } }`
+
+<ParamField body="user" type="string" required>
+  User IIBAN (14–42 characters).
+</ParamField>
+
+<ParamField body="base_asset" type="string" required>
+  Base asset of the pair (e.g. `BTC`).
+</ParamField>
+
+<ParamField body="quote_asset" type="string" required>
+  Quote asset of the pair (e.g. `USD`).
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Direction: `receive` or `spend`.
+</ParamField>
+
+```typescript
+const limits = await client.getEmbedQuoteLimits({
+  user: userIiban,
+  base_asset: 'BTC',
+  quote_asset: 'USD',
+  type: 'spend',
+});
+console.log('Min:', limits.result?.minimum, 'Max:', limits.result?.maximum);
+```
+
+---
+
+### `executeEmbedQuote`
+
+Execute a firm quote that was previously obtained from `requestEmbedQuote`. The trade is placed at the quoted price.
+
+```typescript
+executeEmbedQuote(
+  params: PartnerExecuteQuoteParams,
+): Promise<PartnerExecuteQuoteResponse>
+```
+
+**Returns:** `PartnerExecuteQuoteResponse` — `{ result?: { quote_id, status, transaction_id? } }`
+
+<ParamField body="quote_id" type="string" required>
+  The firm quote ID to execute.
+</ParamField>
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+```typescript
+const execution = await client.executeEmbedQuote({
+  quote_id: quoteId,
+  user: userIiban,
+});
+console.log('Transaction ID:', execution.result?.transaction_id);
+```
+
+---
+
+## Earn
+
+### `getEmbedEarnSummary`
+
+Retrieve a user's Earn summary including total allocated amounts, rewards earned (all-time), auto-earn status, and upcoming rewards.
+
+```typescript
+getEmbedEarnSummary(
+  params: PartnerGetEarnSummaryParams,
+): Promise<PartnerGetEarnSummaryResponse>
+```
+
+**Returns:** `PartnerGetEarnSummaryResponse` — includes `auto_earn_eligible`, `auto_earn_enabled`, `auto_earn_last_changed?`, `payout_period`, `total_allocated_converted`, `total_rewarded_converted_true_rates`, `num_earning_assets`, `upcoming_rewards`.
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="currency" type="string">
+  Currency for converted value display (max 16 chars).
+</ParamField>
+
+```typescript
+const earn = await client.getEmbedEarnSummary({ user: userIiban, currency: 'USD' });
+console.log('Auto-earn enabled:', earn.result.auto_earn_enabled);
+console.log('Total allocated:', earn.result.total_allocated_converted);
+console.log('Total rewards:', earn.result.total_rewarded_converted_true_rates);
+```
+
+---
+
+### `listEmbedEarnAssets`
+
+List assets eligible for Earn products. Optionally pass a `user` to include the user's active allocations in the response.
+
+```typescript
+listEmbedEarnAssets(
+  params?: PartnerListEarnAssetsParams,
+): Promise<PartnerListEarnAssetsResponse>
+```
+
+<ParamField body="assets" type="string[]">
+  Filter to specific assets (max 16 chars each).
+</ParamField>
+
+<ParamField body="user" type="string">
+  IIBAN of a user — if provided, the response includes that user's active allocations.
+</ParamField>
+
+<ParamField body="currency" type="string">
+  Required when `user` is provided. Currency for converted values.
+</ParamField>
+
+```typescript
+const earnAssets = await client.listEmbedEarnAssets({ user: userIiban, currency: 'USD' });
+console.log('Earn assets:', Object.keys(earnAssets.result.assets));
+```
+
+---
+
+### `toggleEmbedAutoEarn`
+
+Enable or disable Auto-Earn for a user. When enabled, idle balances are automatically allocated to Earn strategies. This is an async operation — check the result with `getEmbedEarnSummary`.
+
+```typescript
+toggleEmbedAutoEarn(
+  params: PartnerToggleAutoEarnParams,
+): Promise<PartnerToggleAutoEarnResponse>
+```
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="want_enabled" type="boolean" required>
+  `true` to enable Auto-Earn, `false` to disable.
+</ParamField>
+
+```typescript
+// Enable Auto-Earn
+await client.toggleEmbedAutoEarn({ user: userIiban, want_enabled: true });
+
+// Verify the change
+const earnSummary = await client.getEmbedEarnSummary({ user: userIiban });
+console.log('Auto-earn enabled:', earnSummary.result.auto_earn_enabled);
+```
+
+---
+
+## Custom Orders
+
+Custom orders are price-triggered conditional trades — e.g. "buy 0.01 BTC when price drops to $X". They persist in the system until triggered, completed, or cancelled.
+
+### `createEmbedCustomOrder`
+
+Submit a price-triggered custom order for a user.
+
+```typescript
+createEmbedCustomOrder(
+  params: PartnerCreateCustomOrderParams,
+): Promise<PartnerCreateCustomOrderResponse>
+```
+
+**Returns:** `PartnerCreateCustomOrderResponse` — `{ result?: { order: PartnerCustomOrder } }`
+
+<ParamField body="user" type="string" required>
+  User IIBAN (14–42 characters).
+</ParamField>
+
+<ParamField body="trigger" type="object" required>
+  Price trigger: `{ type: 'price', base_asset, quote_asset, target_price, condition: 'gte' | 'lte' }`.
+</ParamField>
+
+<ParamField body="action" type="object" required>
+  Trade to execute when triggered: `{ type: 'receive' | 'spend', amount: { asset, amount }, quote: { asset, fee_bps, spread_bps } }`.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Human-readable name for the order.
+</ParamField>
+
+```typescript
+const order = await client.createEmbedCustomOrder({
+  user: userIiban,
+  name: 'Buy BTC at 50k',
+  trigger: {
+    type: 'price',
+    base_asset: 'BTC',
+    quote_asset: 'USD',
+    target_price: '50000',
+    condition: 'lte', // trigger when price <= $50,000
+  },
+  action: {
+    type: 'spend',
+    amount: { asset: 'USD', amount: '200' },
+    quote: { asset: 'BTC', fee_bps: '50', spread_bps: '20' },
+  },
+});
+console.log('Custom order ID:', order.result?.order.id);
+```
+
+---
+
+### `getEmbedCustomOrder`
+
+Retrieve a single custom order by its ID.
+
+```typescript
+getEmbedCustomOrder(
+  params: PartnerGetCustomOrderParams,
+): Promise<PartnerGetCustomOrderResponse>
+```
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="order_id" type="string" required>
+  The custom order ID.
+</ParamField>
+
+```typescript
+const co = await client.getEmbedCustomOrder({
+  user: userIiban,
+  order_id: 'order-id-here',
+});
+console.log('Status:', co.result?.order.status);
+```
+
+---
+
+### `listEmbedCustomOrders`
+
+List custom orders for a user, with optional status filtering and cursor-based pagination.
+
+```typescript
+listEmbedCustomOrders(
+  params: PartnerListCustomOrdersParams,
+): Promise<PartnerListCustomOrdersResponse>
+```
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="statuses" type="string[]">
+  Filter by `active`, `cancelled`, or `completed`.
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from `next_cursor`.
+</ParamField>
+
+```typescript
+const orders = await client.listEmbedCustomOrders({
+  user: userIiban,
+  statuses: ['active'],
+});
+orders.result?.orders.forEach((o) => {
+  console.log(`${o.name} (${o.id}): ${JSON.stringify(o.status)}`);
+});
+```
+
+---
+
+### `cancelEmbedCustomOrder`
+
+Cancel a custom order that has not yet been triggered or completed.
+
+```typescript
+cancelEmbedCustomOrder(
+  params: PartnerCancelCustomOrderParams,
+): Promise<PartnerCancelCustomOrderResponse>
+```
+
+<ParamField body="user" type="string" required>
+  User IIBAN.
+</ParamField>
+
+<ParamField body="id" type="string" required>
+  The custom order ID to cancel.
+</ParamField>
+
+```typescript
+const cancelled = await client.cancelEmbedCustomOrder({
+  user: userIiban,
+  id: 'order-id-here',
+});
+console.log('Cancelled order status:', cancelled.result?.order.status);
+```
+
+---
+
+## Settlement Reports
+
+### `getEmbedSettlementReport`
+
+Retrieve a specific settlement report and get a secure download URL for the file.
+
+```typescript
+getEmbedSettlementReport(
+  params: PartnerGetSettlementReportParams,
+): Promise<PartnerGetSettlementReportResponse>
+```
+
+**Returns:** Includes `id`, `date`, `type`, `size`, `name`, `download_url`, `expires_at`.
+
+<ParamField body="id" type="string" required>
+  Settlement report ID.
+</ParamField>
+
+```typescript
+const report = await client.getEmbedSettlementReport({ id: 'report-id-here' });
+console.log('Download URL:', report.result?.download_url);
+console.log('Expires:', report.result?.expires_at);
+```
+
+---
+
+### `listEmbedSettlementReports`
+
+Retrieve a paginated list of settlement reports, optionally filtered by date range and report type.
+
+```typescript
+listEmbedSettlementReports(
+  params?: PartnerListSettlementReportsParams,
+): Promise<PartnerListSettlementReportsResponse>
+```
+
+<ParamField body="filter[start_date]" type="string">
+  RFC 3339 datetime filter for the earliest report date.
+</ParamField>
+
+<ParamField body="filter[end_date]" type="string">
+  RFC 3339 datetime filter for the latest report date.
+</ParamField>
+
+<ParamField body="filter[report_type][]" type="string[]">
+  Filter by report type: `trades`, `transfers`, or `earn_rewards`.
+</ParamField>
+
+<ParamField body="page[size]" type="number">
+  Results per page (1–100, default 20).
+</ParamField>
+
+<ParamField body="page[number]" type="number">
+  Page number (≥1, default 1).
+</ParamField>
+
+```typescript
+const reports = await client.listEmbedSettlementReports({
+  'filter[report_type][]': ['trades'],
+  'page[size]': 10,
+});
+reports.result?.reports.forEach((r) => {
+  console.log(`${r.date} — ${r.type} — ${r.name} (${r.size} bytes)`);
+});
+```
+
+---
+
+## Assets & Rates
+
+### `getEmbedAsset`
+
+Get detailed information about a specific asset including market data and platform status.
+
+```typescript
+getEmbedAsset(params: PartnerGetAssetParams): Promise<PartnerGetAssetResponse>
+```
+
+<ParamField body="asset" type="string" required>
+  Asset name (e.g. `BTC`, `ETH`).
+</ParamField>
+
+<ParamField body="quote" type="string">
+  Quote currency for pricing (default `USD`).
+</ParamField>
+
+```typescript
+const btc = await client.getEmbedAsset({ asset: 'BTC', quote: 'USD' });
+console.log('BTC info:', btc.result);
+```
+
+---
+
+### `listEmbedAssets`
+
+List all assets available on the embedded platform with optional filtering, sorting, and pagination.
+
+```typescript
+listEmbedAssets(params?: PartnerListAssetsParams): Promise<PartnerListAssetsResponse>
+```
+
+<ParamField body="filter[assets][]" type="string[]">
+  Limit results to specific assets (max 100).
+</ParamField>
+
+<ParamField body="filter[tradable_only]" type="boolean">
+  Return only tradable assets.
+</ParamField>
+
+<ParamField body="sort" type="string">
+  Sort order. Options include `trending`, `market_cap_rank`, `-market_cap_rank`, `symbol`, `-symbol`, `change_percent_24h`, `-change_percent_24h`, and others.
+</ParamField>
+
+<ParamField body="page[size]" type="number">
+  Assets per page (1–100).
+</ParamField>
+
+<ParamField body="quote" type="string">
+  Quote currency (default `USD`).
+</ParamField>
+
+```typescript
+const assets = await client.listEmbedAssets({
+  'filter[tradable_only]': true,
+  sort: 'market_cap_rank',
+  'page[size]': 20,
+});
+console.log('Total assets:', assets.result.meta.total_items);
+```
+
+---
+
+### `listEmbedAssetRates`
+
+Retrieve historical rate data (price over time) for a specific asset.
+
+```typescript
+listEmbedAssetRates(
+  params: PartnerListAssetRatesParams,
+): Promise<PartnerListAssetRatesResponse>
+```
+
+**Returns:** `PartnerListAssetRatesResponse` — `{ result: { rates: [{ timestamp, price }][], meta } }`
+
+<ParamField body="asset" type="string" required>
+  Asset name (e.g. `ETH`).
+</ParamField>
+
+<ParamField body="quote" type="string">
+  Quote currency (default `USD`).
+</ParamField>
+
+<ParamField body="start_time" type="string">
+  RFC 3339 start datetime.
+</ParamField>
+
+<ParamField body="end_time" type="string">
+  RFC 3339 end datetime.
+</ParamField>
+
+<ParamField body="interval" type="string">
+  ISO 8601 duration interval (e.g. `PT15M`, `PT60M`, `P1D`).
+</ParamField>
+
+```typescript
+const rates = await client.listEmbedAssetRates({
+  asset: 'ETH',
+  quote: 'USD',
+  start_time: '2025-01-01T00:00:00Z',
+  end_time: '2025-01-31T23:59:59Z',
+  interval: 'P1D',
+});
+rates.result.rates.forEach((r) => console.log(r.timestamp, r.price));
+```
+
+---
+
+## Ramp
+
+The Ramp API enables fiat-to-crypto and crypto-to-fiat conversions through a hosted checkout experience.
+
+### `getRampCheckoutUrl`
+
+Generate a hosted Ramp checkout URL for a specific transaction configuration. Present this URL to the end user to complete the purchase.
+
+```typescript
+getRampCheckoutUrl(
+  params: PartnerGetRampCheckoutUrlParams,
+): Promise<PartnerGetRampCheckoutUrlResponse>
+```
+
+**Returns:** `PartnerGetRampCheckoutUrlResponse` — `{ result: { checkout_url: string, request_data: any } }`
+
+<ParamField body="in_asset" type="string" required>
+  Fiat asset the user is paying with (e.g. `USD`, `EUR`). Max 16 characters.
+</ParamField>
+
+<ParamField body="in_amount" type="string" required>
+  Amount to spend in the fiat asset (decimal128).
+</ParamField>
+
+<ParamField body="out_asset" type="string" required>
+  Crypto asset the user will receive (e.g. `BTC`). Max 16 characters.
+</ParamField>
+
+<ParamField body="funding_type" type="string" required>
+  Payment method type (e.g. `card`, `bank_transfer`).
+</ParamField>
+
+<ParamField body="withdrawal_method" type="string" required>
+  Crypto withdrawal method/network.
+</ParamField>
+
+<ParamField body="country" type="string">
+  ISO 3166-1 alpha-2 country code (max 2 characters).
+</ParamField>
+
+<ParamField body="redirect_url" type="string">
+  URL to redirect the user after checkout completion.
+</ParamField>
+
+<ParamField body="external_user_id" type="string">
+  Your system's user identifier (max 36 characters).
+</ParamField>
+
+<ParamField body="external_transaction_id" type="string">
+  Your system's transaction identifier (max 36 characters).
+</ParamField>
+
+```typescript
+const checkout = await client.getRampCheckoutUrl({
+  in_asset: 'USD',
+  in_amount: '100',
+  out_asset: 'BTC',
+  funding_type: 'card',
+  withdrawal_method: 'Bitcoin',
+  country: 'US',
+  redirect_url: 'https://yourapp.com/ramp/complete',
+  external_user_id: 'user_12345',
+});
+console.log('Checkout URL:', checkout.result.checkout_url);
+// Redirect or embed this URL for the user
+```
+
+---
+
+### `getRampLimits`
+
+Retrieve the combined minimum and maximum limits for a Ramp transaction configuration before presenting a quote to the user.
+
+```typescript
+getRampLimits(
+  params: PartnerGetRampLimitsParams,
+): Promise<PartnerGetRampLimitsResponse>
+```
+
+<ParamField body="in_asset" type="string" required>
+  Fiat input asset.
+</ParamField>
+
+<ParamField body="out_asset" type="string" required>
+  Crypto output asset.
+</ParamField>
+
+<ParamField body="funding_type" type="string" required>
+  Payment method type.
+</ParamField>
+
+<ParamField body="withdrawal_method" type="string" required>
+  Crypto withdrawal method.
+</ParamField>
+
+```typescript
+const limits = await client.getRampLimits({
+  in_asset: 'EUR',
+  out_asset: 'ETH',
+  funding_type: 'card',
+  withdrawal_method: 'Ethereum',
+});
+console.log('Ramp limits:', limits.result.limits);
+```
+
+---
+
+### `getRampProspectiveQuote`
+
+Get an estimated (non-binding) quote for a Ramp transaction without creating a checkout session. Use this to preview the amounts before calling `getRampCheckoutUrl`.
+
+```typescript
+getRampProspectiveQuote(
+  params: PartnerGetRampProspectiveQuoteParams,
+): Promise<PartnerGetRampProspectiveQuoteResponse>
+```
+
+**Returns:** `PartnerGetRampProspectiveQuoteResponse` — `{ result: { spend, receive, unit_price } }`
+
+<ParamField body="in_asset" type="string" required>
+  Fiat input asset.
+</ParamField>
+
+<ParamField body="in_amount" type="string" required>
+  Amount the user is spending.
+</ParamField>
+
+<ParamField body="out_asset" type="string" required>
+  Crypto output asset.
+</ParamField>
+
+<ParamField body="funding_type" type="string" required>
+  Payment method type.
+</ParamField>
+
+<ParamField body="withdrawal_method" type="string" required>
+  Crypto withdrawal method.
+</ParamField>
+
+```typescript
+const prospective = await client.getRampProspectiveQuote({
+  in_asset: 'USD',
+  in_amount: '250',
+  out_asset: 'BTC',
+  funding_type: 'card',
+  withdrawal_method: 'Bitcoin',
+});
+console.log('You will receive:', prospective.result.receive);
+console.log('Unit price:', prospective.result.unit_price);
+```
+
+---
+
+### `listRampBuyCryptoAssets`
+
+List all cryptocurrency assets available for Ramp buy transactions, including supported networks and withdrawal methods.
+
+```typescript
+listRampBuyCryptoAssets(): Promise<PartnerListRampBuyCryptoAssetsResponse>
+```
+
+```typescript
+const cryptoAssets = await client.listRampBuyCryptoAssets();
+console.log('Supported crypto:', cryptoAssets.result.assets);
+```
+
+---
+
+### `listRampCountries`
+
+List countries and regions where Ramp is available. Availability may be scoped to specific states or provinces based on regulation.
+
+```typescript
+listRampCountries(): Promise<PartnerListRampCountriesResponse>
+```
+
+```typescript
+const countries = await client.listRampCountries();
+console.log('Available countries:', countries.result.countries.length);
+```
+
+---
+
+### `listRampFiatCurrencies`
+
+List fiat currencies supported for funding Ramp transactions.
+
+```typescript
+listRampFiatCurrencies(): Promise<PartnerListRampFiatCurrenciesResponse>
+```
+
+```typescript
+const fiats = await client.listRampFiatCurrencies();
+fiats.result.currencies.forEach((c) => console.log(c.asset));
+```
+
+---
+
+### `listRampPaymentMethods`
+
+List fiat payment methods (e.g. `card`, `bank_transfer`) supported for Ramp deposits.
+
+```typescript
+listRampPaymentMethods(): Promise<PartnerListRampPaymentMethodsResponse>
+```
+
+```typescript
+const methods = await client.listRampPaymentMethods();
+methods.result.methods.forEach((m) => console.log(m.funding_type, m.external_id));
+```
+
+---
+
+## Full Integration Examples
+
+<Tabs>
+
+<Tab title="User Onboarding & First Trade">
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.PARTNER_API_KEY,
+  apiSecret: process.env.PARTNER_API_SECRET,
+});
+
+async function onboardAndTrade() {
+  // 1. Create a new user
+  const created = await client.createEmbedUser({
+    email: 'bob@example.com',
+    external_id: 'bob_007',
+    tos_version_accepted: 1,
+    full_name: { first_name: 'Bob', last_name: 'Jones' },
+    date_of_birth: '1985-03-22',
+    residence: {
+      line1: '456 Oak Ave',
+      city: 'Austin',
+      postal_code: '78701',
+      country: 'US',
+    },
+    phone: '+15125550100',
+    nationalities: ['US'],
+    occupation: 'business_management',
+  });
+  const userIiban = created.result.user.iiban;
+  console.log('Created user:', userIiban);
+
+  // 2. Check account status
+  const user = await client.getEmbedUser({ user: userIiban });
+  console.log('Status:', user.result?.status.state);
+
+  // 3. Get a quote for 100 USD → BTC
+  const quote = await client.requestEmbedQuote({
+    user: userIiban,
+    type: 'spend',
+    amount: { asset: 'USD', amount: '100' },
+    quote: { asset: 'BTC' },
+    fee_bps: '50',
+    spread_bps: '20',
+  });
+  console.log('Quote:', quote.result.quote_id, 'expires:', quote.result.expires);
+
+  // 4. Execute the quote
+  const exec = await client.executeEmbedQuote({
+    quote_id: quote.result.quote_id,
+    user: userIiban,
+  });
+  console.log('Executed! Transaction ID:', exec.result?.transaction_id);
+
+  // 5. Check portfolio
+  const portfolio = await client.getEmbedPortfolioSummary({ user: userIiban });
+  console.log('Portfolio value:', portfolio.result.portfolio_value, portfolio.result.currency);
+}
+
+onboardAndTrade().catch(console.error);
+```
+
+</Tab>
+
+<Tab title="Earn Flow">
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.PARTNER_API_KEY,
+  apiSecret: process.env.PARTNER_API_SECRET,
+});
+
+async function earnFlow(userIiban: string) {
+  // 1. Check current earn status
+  const summary = await client.getEmbedEarnSummary({
+    user: userIiban,
+    currency: 'USD',
+  });
+  console.log('Auto-earn eligible:', summary.result.auto_earn_eligible);
+  console.log('Currently earning:', summary.result.num_earning_assets, 'assets');
+
+  // 2. List available earn assets
+  const earnAssets = await client.listEmbedEarnAssets({
+    user: userIiban,
+    currency: 'USD',
+  });
+  console.log('Earn assets:', Object.keys(earnAssets.result.assets));
+
+  // 3. Enable Auto-Earn
+  if (summary.result.auto_earn_eligible && !summary.result.auto_earn_enabled) {
+    await client.toggleEmbedAutoEarn({ user: userIiban, want_enabled: true });
+    console.log('Auto-Earn enabled');
+  }
+
+  // 4. Verify new status
+  const updated = await client.getEmbedEarnSummary({ user: userIiban });
+  console.log('Auto-earn now:', updated.result.auto_earn_enabled);
+}
+
+earnFlow('user-iiban-here').catch(console.error);
+```
+
+</Tab>
+
+<Tab title="Ramp Checkout">
+
+```typescript
+import { PartnerClient } from '@siebly/kraken-api';
+
+const client = new PartnerClient({
+  apiKey: process.env.PARTNER_API_KEY,
+  apiSecret: process.env.PARTNER_API_SECRET,
+});
+
+async function rampFlow() {
+  // 1. Check supported options
+  const [cryptoAssets, fiats, methods, countries] = await Promise.all([
+    client.listRampBuyCryptoAssets(),
+    client.listRampFiatCurrencies(),
+    client.listRampPaymentMethods(),
+    client.listRampCountries(),
+  ]);
+  console.log('Crypto assets:', cryptoAssets.result.assets.length);
+  console.log('Fiat currencies:', fiats.result.currencies.map((c) => c.asset));
+  console.log('Payment methods:', methods.result.methods.map((m) => m.funding_type));
+
+  // 2. Preview the quote
+  const preview = await client.getRampProspectiveQuote({
+    in_asset: 'USD',
+    in_amount: '100',
+    out_asset: 'BTC',
+    funding_type: 'card',
+    withdrawal_method: 'Bitcoin',
+  });
+  console.log('User will receive:', preview.result.receive);
+
+  // 3. Generate checkout URL
+  const checkout = await client.getRampCheckoutUrl({
+    in_asset: 'USD',
+    in_amount: '100',
+    out_asset: 'BTC',
+    funding_type: 'card',
+    withdrawal_method: 'Bitcoin',
+    country: 'US',
+    redirect_url: 'https://yourapp.com/ramp/success',
+    external_user_id: 'user_12345',
+    external_transaction_id: 'txn_abc123',
+  });
+  console.log('Redirect user to:', checkout.result.checkout_url);
+}
+
+rampFlow().catch(console.error);
+```
+
+</Tab>
+
+</Tabs>

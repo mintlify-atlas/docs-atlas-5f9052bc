@@ -1,20 +1,110 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "Kraken API SDK: Node.js & TypeScript for Kraken"
+sidebarTitle: "Home"
+description: "Complete Node.js and TypeScript SDK for Kraken's REST APIs and WebSockets. Covers Spot, Derivatives, Institutional, and Partner APIs with automatic reconnection."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+The `@siebly/kraken-api` SDK gives you a single, production-tested JavaScript and TypeScript interface to all of Kraken's REST APIs and WebSocket streams. Whether you're building a trading bot, a market data dashboard, or a portfolio monitor, you get dedicated clients for every Kraken product group — all with full TypeScript definitions, automatic WebSocket reconnection, and both ESM and CJS module support.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Make your first Kraken API call in under 5 minutes
+  </Card>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Set up API keys for Spot and Derivatives trading
+  </Card>
+  <Card title="Spot Client" icon="chart-line" href="/rest/spot-client">
+    REST API for spot trading, account management, and funding
+  </Card>
+  <Card title="Derivatives Client" icon="chart-candlestick" href="/rest/derivatives-client">
+    REST API for futures and perpetual contract trading
+  </Card>
+  <Card title="WebSocket Streams" icon="bolt" href="/websockets/overview">
+    Real-time market data and account updates via WebSockets
+  </Card>
+  <Card title="API Reference" icon="code" href="/reference/spot/market-data">
+    Full method signatures, parameters, and return types
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What's in the SDK
+
+The SDK ships five client classes, each covering a distinct segment of Kraken's API surface:
+
+<CardGroup cols={2}>
+  <Card title="SpotClient" icon="circle-dollar" href="/rest/spot-client">
+    Spot trading, staking/earn, deposits, withdrawals, and subaccount management
+  </Card>
+  <Card title="DerivativesClient" icon="chart-mixed" href="/rest/derivatives-client">
+    Futures and perpetual contracts — market data, order management, and account state
+  </Card>
+  <Card title="WebsocketClient" icon="wifi" href="/websockets/overview">
+    Unified WebSocket client for all Kraken markets — public and private streams
+  </Card>
+  <Card title="WebsocketAPIClient" icon="square-terminal" href="/websockets/websocket-api-client">
+    REST-like Spot trading over a persistent WebSocket connection for lower latency
+  </Card>
+  <Card title="InstitutionalClient" icon="building-columns" href="/rest/institutional-client">
+    OTC trading desk and custody APIs for institutional accounts
+  </Card>
+  <Card title="PartnerClient" icon="handshake" href="/rest/partner-client">
+    Embedded finance and ramp APIs for partner integrations
+  </Card>
+</CardGroup>
+
+## Get started
+
+<Steps>
+  <Step title="Install the package">
+    ```bash
+    npm install @siebly/kraken-api
+    ```
+  </Step>
+  <Step title="Create your first client">
+    ```typescript
+    import { SpotClient } from '@siebly/kraken-api';
+
+    const client = new SpotClient();
+    const ticker = await client.getTicker({ pair: 'XBTUSD' });
+    console.log(ticker);
+    ```
+  </Step>
+  <Step title="Add credentials for private endpoints">
+    ```typescript
+    const client = new SpotClient({
+      apiKey: process.env.API_SPOT_KEY,
+      apiSecret: process.env.API_SPOT_SECRET,
+    });
+
+    const balance = await client.getAccountBalance();
+    ```
+  </Step>
+  <Step title="Subscribe to real-time data">
+    ```typescript
+    import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+    const ws = new WebsocketClient();
+    ws.on('message', (data) => console.log(data));
+
+    ws.subscribe(
+      { topic: 'ticker', payload: { symbol: ['BTC/USD'] } },
+      WS_KEY_MAP.spotPublicV2,
+    );
+    ```
+  </Step>
+</Steps>
+
+## Key features
+
+- **Complete API coverage** — dedicated REST clients for Spot, Derivatives, Institutional, and Partner operations
+- **Unified WebSocket client** — one `WebsocketClient` for all Kraken markets, public and private
+- **WebSocket API trading** — `WebsocketAPIClient` wraps Spot order management in awaitable promises over a persistent connection
+- **TypeScript-first** — strongly typed request and response shapes for every method
+- **Automatic reconnection** — heartbeat monitoring, reconnect, and resubscribe handled for you
+- **Dual module support** — works in ESM and CJS projects without configuration
+- **Browser compatible** — HMAC signing uses the Web Crypto API for frontend use
+- **Testnet support** — route Derivatives calls to Kraken's demo environment with `testnet: true`
+
+<Note>
+  Public market data endpoints (tickers, order books, candles, recent trades) do not require API keys. Only private endpoints — account balances, order management, deposits, and withdrawals — need authentication.
+</Note>

@@ -1,0 +1,134 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Kraken API",
+  "projectDescription": "A complete Node.js and JavaScript SDK for Kraken's REST APIs and WebSockets, with full TypeScript support and browser compatibility.",
+  "theme": "luma",
+  "primaryColor": "#0d152d",
+  "lightColor": "#848c94",
+  "darkColor": "#c9cacf",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "REST Clients",
+            "pages": [
+              "rest/spot-client",
+              "rest/derivatives-client",
+              "rest/institutional-client",
+              "rest/partner-client"
+            ]
+          },
+          {
+            "group": "WebSockets",
+            "pages": [
+              "websockets/overview",
+              "websockets/public-streams",
+              "websockets/private-streams",
+              "websockets/websocket-api-client"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/error-handling",
+              "guides/logging",
+              "guides/browser-usage",
+              "guides/production-tips"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Spot",
+            "pages": [
+              "reference/spot/market-data",
+              "reference/spot/account",
+              "reference/spot/orders",
+              "reference/spot/funding"
+            ]
+          },
+          {
+            "group": "Derivatives",
+            "pages": [
+              "reference/derivatives/market-data",
+              "reference/derivatives/account",
+              "reference/derivatives/orders"
+            ]
+          },
+          {
+            "group": "WebSocket API",
+            "pages": [
+              "reference/websocket-api/spot-trading"
+            ]
+          },
+          {
+            "group": "Institutional & Partner",
+            "pages": [
+              "reference/institutional",
+              "reference/partner"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Dedicated REST clients for Spot, Derivatives, Institutional, and Partner APIs",
+    "Unified WebsocketClient for all Kraken WebSocket markets (Spot & Futures)",
+    "WebsocketAPIClient for REST-like trading over persistent WebSocket connections",
+    "Full TypeScript support with strongly typed requests and responses",
+    "Automatic WebSocket reconnection, resubscription, and heartbeat management",
+    "Browser-compatible HMAC signature mechanism",
+    "Dual ESM and CJS module support",
+    "Proxy support via axios",
+    "Testnet/demo environment support for Derivatives",
+    "Built-in nanoid-based order ID generation"
+  ],
+  "publicApiSurface": [
+    "SpotClient",
+    "DerivativesClient",
+    "InstitutionalClient",
+    "PartnerClient",
+    "WebsocketClient",
+    "WebsocketAPIClient",
+    "WS_KEY_MAP",
+    "DefaultLogger",
+    "REST_CLIENT_TYPE_ENUM",
+    "SpotClient.submitOrder()",
+    "SpotClient.submitBatchOrders()",
+    "SpotClient.cancelOrder()",
+    "SpotClient.amendOrder()",
+    "SpotClient.getAccountBalance()",
+    "SpotClient.getTicker()",
+    "SpotClient.getOrderBook()",
+    "SpotClient.getWebSocketsToken()",
+    "DerivativesClient.submitOrder()",
+    "DerivativesClient.batchOrderManagement()",
+    "DerivativesClient.getAccounts()",
+    "DerivativesClient.getTickers()",
+    "DerivativesClient.getOrderbook()",
+    "WebsocketClient.subscribe()",
+    "WebsocketClient.unsubscribe()",
+    "WebsocketClient.on()",
+    "WebsocketAPIClient.submitSpotOrder()",
+    "WebsocketAPIClient.amendSpotOrder()",
+    "WebsocketAPIClient.cancelSpotOrder()",
+    "WebsocketAPIClient.cancelAllSpotOrders()",
+    "WebsocketAPIClient.batchSubmitSpotOrders()",
+    "WebsocketAPIClient.batchCancelSpotOrders()",
+    "WebsocketAPIClient.getWSClient()"
+  ]
+}

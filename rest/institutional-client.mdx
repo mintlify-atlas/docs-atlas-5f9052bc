@@ -1,0 +1,229 @@
+---
+title: "InstitutionalClient: OTC and Custody API for Kraken"
+sidebarTitle: "Institutional Client"
+description: "InstitutionalClient provides access to Kraken's OTC trading desk and custody APIs — quote management, vault operations, and transaction history for institutional accounts."
+---
+
+`InstitutionalClient` is the gateway to Kraken's institutional-grade services: the [OTC trading desk](https://docs.kraken.com/api/docs/otc-api) and the [custody platform](https://docs.kraken.com/api/docs/custody-api). It is designed for hedge funds, asset managers, family offices, and corporate treasuries that require direct quote negotiation, segregated custody vaults, and auditability through structured task and activity logs. Requests are routed to `https://api.kraken.com`.
+
+<Note>
+  `InstitutionalClient` requires a dedicated institutional account with Kraken. Standard retail or pro accounts cannot access these endpoints. Contact [Kraken Institutional](https://www.kraken.com/en-us/institutional) to apply for access.
+</Note>
+
+---
+
+## Constructor
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: process.env.API_INSTITUTIONAL_KEY,
+  apiSecret: process.env.API_INSTITUTIONAL_SECRET,
+});
+```
+
+All `InstitutionalClient` methods are authenticated. There are no public endpoints on this client.
+
+---
+
+## OTC Methods
+
+The OTC API allows institutional clients to negotiate and execute block trades directly with Kraken's trading desk, bypassing the public order book.
+
+| Method | Description |
+|---|---|
+| `checkOtcClient(params?)` | Verify that the authenticated account has OTC portal access and retrieve its permissions. Required API permissions: Funds permissions - Query and Deposit. |
+| `getOtcPairs(params?)` | Retrieve the list of asset pairs available for OTC trading. |
+| `createOtcQuoteRequest(params)` | Submit a new RFQ (request for quote) to the OTC desk. Returns an OTC quote with a price valid for a short window. Required API permissions: Orders and trades - Create & modify orders. |
+| `getOtcActiveQuotes(params?)` | Retrieve all currently active (open) OTC quotes for the account or a specific vault. Required API permissions: Orders and trades - Query open orders & trades. |
+| `updateOtcQuote(params)` | Accept or reject an active OTC quote. Required API permissions: Orders and trades - Create & modify orders. |
+| `getOtcHistoricalQuotes(params?)` | Retrieve historical OTC quote records for audit or reconciliation. Required API permissions: Orders and trades - Query open orders & trades. |
+| `getOtcExposures(params?)` | Retrieve the maximum and currently used OTC credit exposures for the account. Required API permissions: Orders and trades - Query open orders & trades. |
+
+---
+
+## Custody Methods
+
+The custody API manages segregated vaults, controlled deposit and withdrawal flows, and full activity auditing within Kraken's qualified custody infrastructure.
+
+**Vaults & Balances**
+
+| Method | Description |
+|---|---|
+| `listCustodyVaults(params)` | List all custody vaults in the account's custody domain with their balances and metadata. |
+| `getCustodyVaultbyId(params)` | Retrieve detailed information and current balances for a specific vault by ID. |
+
+**Deposits**
+
+| Method | Description |
+|---|---|
+| `getCustodyDepositMethods(params)` | List deposit funding methods available for a specific asset within a vault. The `x-vault-id` header is required. |
+| `getCustodyDepositAddresses(params)` | Retrieve or generate a deposit address for a specific asset and funding method within a vault. |
+
+**Transactions**
+
+| Method | Description |
+|---|---|
+| `listCustodyTransactions(params)` | Retrieve the transaction history (deposits and withdrawals) for a specified vault. Supports pagination and filtering. |
+| `getCustodyTransactionbyId(params)` | Retrieve a specific transaction by its ID. |
+
+**Withdrawals**
+
+| Method | Description |
+|---|---|
+| `getCustodyWithdrawMethods(params)` | List withdrawal methods available for a specific asset within a vault. The `x-vault-id` header is required. |
+| `getCustodyWithdrawAddresses(params)` | List approved withdrawal addresses for a vault. Optionally filter by preferred asset name. |
+
+**Tasks & Activities**
+
+| Method | Description |
+|---|---|
+| `listCustodyTasks(params)` | Retrieve review tasks that match specified filter criteria. Tasks represent pending approvals in multi-sig custody workflows. |
+| `getCustodyTaskbyId(params)` | Retrieve details for a specific task, including its approval status and signatories. |
+| `listCustodyActivities(params)` | List all activities matching specified filter criteria. Activities represent completed or in-progress custody events. |
+| `getCustodyActivitybyId(params)` | Retrieve details for a specific activity. |
+
+---
+
+## Usage Examples
+
+### OTC Quote Lifecycle
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: process.env.API_INSTITUTIONAL_KEY,
+  apiSecret: process.env.API_INSTITUTIONAL_SECRET,
+});
+
+// Step 1: Check that OTC access is enabled
+const clientCheck = await client.checkOtcClient();
+console.log('OTC Access:', JSON.stringify(clientCheck, null, 2));
+
+// Step 2: List available OTC pairs
+const pairs = await client.getOtcPairs();
+console.log('OTC Pairs:', JSON.stringify(pairs, null, 2));
+
+// Step 3: Check current credit exposure
+const exposures = await client.getOtcExposures();
+console.log('Exposures:', JSON.stringify(exposures, null, 2));
+
+// Step 4: Request a quote for 5 BTC (sell XBT, receive USD)
+const quote = await client.createOtcQuoteRequest({
+  base_asset: 'XBT',
+  quote_asset: 'USD',
+  side: 'sell',
+  base_qty: '5',
+});
+console.log('Quote:', JSON.stringify(quote, null, 2));
+// quote contains: quote_id, price, expiry_time, ...
+
+// Step 5: Accept the quote
+const quoteUpdate = await client.updateOtcQuote({
+  quote_id: quote.result.quote_id,
+  action: 'accept',
+});
+console.log('Quote Update:', JSON.stringify(quoteUpdate, null, 2));
+```
+
+### Reviewing Historical Quotes
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: process.env.API_INSTITUTIONAL_KEY,
+  apiSecret: process.env.API_INSTITUTIONAL_SECRET,
+});
+
+// List all past quotes for reconciliation
+const history = await client.getOtcHistoricalQuotes();
+console.log('Historical Quotes:', JSON.stringify(history, null, 2));
+
+// Check for any currently active (unaccepted) quotes
+const activeQuotes = await client.getOtcActiveQuotes();
+console.log('Active Quotes:', JSON.stringify(activeQuotes, null, 2));
+```
+
+### Custody Vault Operations
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: process.env.API_INSTITUTIONAL_KEY,
+  apiSecret: process.env.API_INSTITUTIONAL_SECRET,
+});
+
+// List all vaults and their balances
+const vaults = await client.listCustodyVaults({ nonce: Date.now() });
+console.log('Vaults:', JSON.stringify(vaults, null, 2));
+
+const vaultId = vaults.result.vaults[0].id;
+
+// Get detailed info for a specific vault
+const vault = await client.getCustodyVaultbyId({ id: vaultId });
+console.log('Vault:', JSON.stringify(vault, null, 2));
+
+// Get deposit methods for BTC in this vault
+const depositMethods = await client.getCustodyDepositMethods({
+  'x-vault-id': vaultId,
+  asset: 'XBT',
+});
+console.log('Deposit Methods:', JSON.stringify(depositMethods, null, 2));
+
+// Get (or generate) a deposit address
+const depositAddresses = await client.getCustodyDepositAddresses({
+  'x-vault-id': vaultId,
+  asset: 'XBT',
+  method: depositMethods.result[0].method,
+});
+console.log('Deposit Addresses:', JSON.stringify(depositAddresses, null, 2));
+```
+
+### Transaction History & Audit
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: process.env.API_INSTITUTIONAL_KEY,
+  apiSecret: process.env.API_INSTITUTIONAL_SECRET,
+});
+
+const vaultId = 'your-vault-id';
+
+// List recent transactions for a vault
+const transactions = await client.listCustodyTransactions({
+  id: vaultId,
+  nonce: Date.now(),
+});
+console.log('Transactions:', JSON.stringify(transactions, null, 2));
+
+// Retrieve a specific transaction by ID
+const tx = await client.getCustodyTransactionbyId({
+  id: 'transaction-id',
+  nonce: Date.now(),
+});
+console.log('Transaction:', JSON.stringify(tx, null, 2));
+
+// List pending review tasks (e.g. withdrawal approvals)
+const tasks = await client.listCustodyTasks({ nonce: Date.now() });
+console.log('Tasks:', JSON.stringify(tasks, null, 2));
+
+// List all custody activities
+const activities = await client.listCustodyActivities({ nonce: Date.now() });
+console.log('Activities:', JSON.stringify(activities, null, 2));
+```
+
+---
+
+## Further Reading
+
+<CardGroup cols={1}>
+  <Card title="Institutional API Reference" href="/reference/institutional">
+    Full parameter documentation for all OTC and custody endpoints.
+  </Card>
+</CardGroup>

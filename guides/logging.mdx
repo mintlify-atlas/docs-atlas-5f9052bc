@@ -1,0 +1,208 @@
+---
+title: "Customise SDK Logging for Kraken API Integration"
+sidebarTitle: "Logging"
+description: "Inject a custom logger into WebsocketClient or SpotClient to integrate Kraken SDK logs with your application's logging stack, including trace, info, and error levels."
+---
+
+The `@siebly/kraken-api` SDK ships with a built-in default logger that writes `info` and `error` messages to the console and silently discards `trace`-level output. For most development work this is fine, but in production you will almost certainly want SDK logs flowing into the same structured logging pipeline as the rest of your application — whether that is `pino`, `winston`, a cloud logging service, or something else entirely. The SDK makes this straightforward: pass any object that satisfies the `DefaultLogger` interface as the second argument to `WebsocketClient`, and the SDK will route all internal log calls through it.
+
+## The `DefaultLogger` interface
+
+The SDK exports both the default implementation and its type. The interface is intentionally minimal — three methods, each accepting a variadic argument list:
+
+```typescript
+// src/lib/websocket/logger.ts
+
+export type LogParams = null | any;
+
+export const DefaultLogger = {
+  trace: (..._params: LogParams): void => {
+    // no-op by default — trace logs are suppressed unless you enable them
+  },
+  info: (...params: LogParams): void => {
+    console.info(params);
+  },
+  error: (...params: LogParams): void => {
+    console.error(params);
+  },
+};
+
+export type DefaultLogger = typeof DefaultLogger;
+```
+
+Your custom logger only needs to implement these three methods. The SDK calls them internally for:
+
+- `trace` — verbose connection lifecycle events (subscribe/unsubscribe dispatches, heartbeat ticks, raw frame details). Useful for debugging; noisy in production.
+- `info` — routine operational messages (connection opened, authentication succeeded, subscription confirmed).
+- `error` — unexpected conditions that warrant attention (failed authentication, unhandled message types, connection errors).
+
+## Custom logger example
+
+The simplest approach is to define an object literal that matches the `DefaultLogger` type and pass it directly to the `WebsocketClient` constructor. This pattern is taken directly from the SDK's own examples:
+
+```typescript
+import {
+  WebsocketClient,
+  DefaultLogger,
+  LogParams,
+  WS_KEY_MAP,
+} from '@siebly/kraken-api';
+
+const customLogger: DefaultLogger = {
+  trace: (...params: LogParams): void => {
+    // Intentionally suppressed — enable below for connection debugging:
+    // console.log('trace', ...params);
+  },
+  info: (...params: LogParams): void => {
+    console.log('info', ...params);
+  },
+  error: (...params: LogParams): void => {
+    console.error('error', ...params);
+  },
+};
+
+// Pass the logger as the second argument
+const client = new WebsocketClient(
+  {
+    apiKey: process.env.API_SPOT_KEY!,
+    apiSecret: process.env.API_SPOT_SECRET!,
+  },
+  customLogger,
+);
+
+client.on('message', (data) => {
+  console.log('Received:', JSON.stringify(data));
+});
+
+client.subscribe(
+  { topic: 'ticker', payload: { symbol: ['BTC/USD', 'ETH/USD'] } },
+  WS_KEY_MAP.spotPublicV2,
+);
+```
+
+<Note>
+The logger is the **second argument** to the `WebsocketClient` constructor. The first argument is the options object (which holds your API credentials, proxy settings, etc.). If you only need a logger and have no credentials, pass an empty object as the first argument: `new WebsocketClient({}, customLogger)`.
+</Note>
+
+## Suppressing trace logs
+
+In production environments, `trace` logging produces a high volume of output that is rarely useful outside of active debugging sessions. The default logger already suppresses trace, but if you are building a custom logger that forwards `info` and `error` to an external sink, make sure you also include a silent `trace` to avoid accidentally flooding your logging infrastructure:
+
+```typescript
+const productionLogger: DefaultLogger = {
+  trace: (..._params: LogParams): void => {
+    // No-op in production — enables below only when debugging connections
+  },
+  info: (...params: LogParams): void => {
+    myLogger.info({ source: 'kraken-sdk' }, ...params);
+  },
+  error: (...params: LogParams): void => {
+    myLogger.error({ source: 'kraken-sdk' }, ...params);
+  },
+};
+```
+
+<Tip>
+When debugging a persistent connection issue — such as subscriptions not arriving, or authentication silently failing — enable `trace` temporarily by uncommenting your trace method body. Trace logs expose the full internal lifecycle of each WebSocket connection, including every message sent and received, making it straightforward to pinpoint where things diverge from the expected flow.
+</Tip>
+
+## Integrating with popular loggers
+
+### Using with `pino`
+
+`pino` is a fast, low-overhead JSON logger popular in Node.js services. Map each SDK log level to its `pino` equivalent:
+
+```typescript
+import pino from 'pino';
+import { WebsocketClient, DefaultLogger, LogParams } from '@siebly/kraken-api';
+
+const logger = pino({ level: 'info' });
+
+const pinoLogger: DefaultLogger = {
+  trace: (...params: LogParams): void => {
+    logger.trace({ params }, 'kraken-sdk trace');
+  },
+  info: (...params: LogParams): void => {
+    logger.info({ params }, 'kraken-sdk info');
+  },
+  error: (...params: LogParams): void => {
+    logger.error({ params }, 'kraken-sdk error');
+  },
+};
+
+const client = new WebsocketClient({}, pinoLogger);
+```
+
+Set `level: 'trace'` on the pino logger if you want full trace output, or keep it at `'info'` to suppress trace in production.
+
+### Using with `winston`
+
+`winston` is a versatile logger that supports multiple transports (files, HTTP, external services). The adapter is the same shape:
+
+```typescript
+import winston from 'winston';
+import { WebsocketClient, DefaultLogger, LogParams } from '@siebly/kraken-api';
+
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json(),
+  ),
+  transports: [new winston.transports.Console()],
+});
+
+const winstonLogger: DefaultLogger = {
+  trace: (...params: LogParams): void => {
+    logger.debug({ params, source: 'kraken-sdk' });
+  },
+  info: (...params: LogParams): void => {
+    logger.info({ params, source: 'kraken-sdk' });
+  },
+  error: (...params: LogParams): void => {
+    logger.error({ params, source: 'kraken-sdk' });
+  },
+};
+
+const client = new WebsocketClient(
+  {
+    apiKey: process.env.API_SPOT_KEY!,
+    apiSecret: process.env.API_SPOT_SECRET!,
+  },
+  winstonLogger,
+);
+```
+
+Note that `pino` and `winston` both use `debug` rather than `trace` as their lowest named level. Mapping SDK `trace` → `debug` is the conventional approach.
+
+### Using with `console` (default behaviour)
+
+If you want to replicate the default behaviour explicitly — for example, to add a prefix to every message without changing the output format — override only the methods you care about:
+
+```typescript
+import { WebsocketClient, DefaultLogger, LogParams } from '@siebly/kraken-api';
+
+const prefixedLogger: DefaultLogger = {
+  trace: (..._params: LogParams): void => {
+    // suppress, matching SDK default
+  },
+  info: (...params: LogParams): void => {
+    console.info('[kraken-sdk]', ...params);
+  },
+  error: (...params: LogParams): void => {
+    console.error('[kraken-sdk]', ...params);
+  },
+};
+
+const client = new WebsocketClient({}, prefixedLogger);
+```
+
+## REST client logging
+
+REST clients (`SpotClient`, `DerivativesClient`) do not accept a custom logger argument — they use `axios` internally and surface errors through promise rejections rather than log calls. If you need HTTP-level visibility into REST requests and responses, set the `KRAKENTRACE` environment variable before starting your process:
+
+```bash
+KRAKENTRACE=1 node dist/bot.js
+```
+
+When `KRAKENTRACE` is set, the SDK registers `axios` interceptors that log every outgoing request (URL, method, params) and every incoming response (status, headers, body) to `console.log`. This is intended for development-time debugging only — disable it in production.

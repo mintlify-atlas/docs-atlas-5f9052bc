@@ -1,0 +1,786 @@
+---
+title: "InstitutionalClient: OTC and Custody API Reference"
+sidebarTitle: "Institutional"
+description: "Complete method reference for InstitutionalClient — OTC quote management, custody vault operations, transaction history, and deposit/withdrawal for institutional accounts."
+---
+
+The `InstitutionalClient` provides programmatic access to Kraken's institutional-grade APIs: the **OTC (Over-The-Counter) trading API** for large-block quote requests and fills, and the **Custody API** for managing segregated vaults, viewing transaction history, and initiating deposits and withdrawals. It is designed for institutional clients such as asset managers, hedge funds, and treasury operations that require a higher level of security, compliance controls, and trade execution quality than the standard Spot API provides.
+
+<Note>
+  Access to the Institutional API requires a separate agreement with Kraken. OTC and Custody access are provisioned independently. Contact your Kraken account manager or visit [kraken.com/institutions](https://www.kraken.com/institutions) to get started.
+</Note>
+
+---
+
+## Constructor
+
+Instantiate the client with your institutional API key and secret. All methods use authenticated private endpoints.
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: 'insert_api_key_here',
+  apiSecret: 'insert_api_secret_here',
+});
+```
+
+### `generateNewOrderID()`
+
+A convenience utility that generates a cryptographically random 32-character order ID using `nanoid`. Use this to populate `client_order_id` fields.
+
+```typescript
+const orderId = client.generateNewOrderID();
+// e.g. "v2a8kL9mXqWpY3jNzRtCbD4eGhFsUiOQ"
+```
+
+---
+
+## OTC Trading
+
+The OTC API allows institutional clients to request and execute large-block trades off the public order book, with price discovery via a request-for-quote (RFQ) flow.
+
+### `checkOtcClient`
+
+Verify your account's OTC eligibility and retrieve the list of permissions granted to your API key for the OTC portal.
+
+**Required permissions:** Funds permissions — Query and Funds permissions — Deposit.
+
+```typescript
+checkOtcClient(params?: { nonce?: number }): Promise<OTCCheckClientResponse>
+```
+
+**Returns:** `OTCCheckClientResponse` — `{ result?: { permissions: string[] }, error: string[] }`
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: 'insert_api_key_here',
+  apiSecret: 'insert_api_secret_here',
+});
+
+const response = await client.checkOtcClient();
+console.log('OTC permissions:', response.result?.permissions);
+// e.g. ["rfq", "trade", "view"]
+```
+
+---
+
+### `createOtcQuoteRequest`
+
+Submit a new OTC request-for-quote (RFQ). The exchange returns a live, executable quote for the specified currency pair, side, and amount.
+
+**Required permissions:** Orders and trades — Create & modify orders.
+
+```typescript
+createOtcQuoteRequest(
+  params: OTCCreateQuoteRequestParams,
+): Promise<OTCCreateQuoteResponse>
+```
+
+**Returns:** `OTCCreateQuoteResponse` — `{ result?: { quote: OtcQuote }, error: string[] }`
+
+<ParamField body="base" type="string" required>
+  The base currency of the trade (e.g. `BTC`).
+</ParamField>
+
+<ParamField body="quote" type="string" required>
+  The quote currency of the trade (e.g. `USD`).
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Direction of the trade: `buy` or `sell`.
+</ParamField>
+
+<ParamField body="amount" type="string">
+  Amount in base currency to buy or sell. Provide either `amount` or `total`.
+</ParamField>
+
+<ParamField body="total" type="string">
+  Amount in quote currency to spend or receive. Provide either `amount` or `total`.
+</ParamField>
+
+<CodeGroup>
+
+```typescript Buy BTC with Amount
+const client = new InstitutionalClient({
+  apiKey: 'insert_api_key_here',
+  apiSecret: 'insert_api_secret_here',
+});
+
+const response = await client.createOtcQuoteRequest({
+  base: 'BTC',
+  quote: 'USD',
+  type: 'buy',
+  amount: '1.5', // buy 1.5 BTC
+});
+console.log('Quote:', response.result?.quote);
+```
+
+```typescript Sell ETH for Total
+const response = await client.createOtcQuoteRequest({
+  base: 'ETH',
+  quote: 'USD',
+  type: 'sell',
+  total: '50000', // sell ETH worth $50,000
+});
+```
+
+</CodeGroup>
+
+---
+
+### `getOtcActiveQuotes`
+
+Retrieve a list of currently active (open and not yet accepted/rejected) OTC quotes.
+
+**Required permissions:** Orders and trades — Query open orders & trades.
+
+```typescript
+getOtcActiveQuotes(params?: {
+  nonce?: number;
+  vault_id?: string;
+}): Promise<OTCGetActiveQuotesResponse>
+```
+
+**Returns:** `OTCGetActiveQuotesResponse` — `{ result?: OtcActiveQuote[], error: string[] }`
+
+Each `OtcActiveQuote` contains: `quote_id`, `base`, `quote`, `type`, `price?`, `amount`, `total?`, `settlement`, `expires.time`, `client_order_id?`.
+
+```typescript
+const response = await client.getOtcActiveQuotes();
+response.result?.forEach((q) => {
+  console.log(`${q.quote_id}: ${q.type} ${q.amount} ${q.base}/${q.quote} @ ${q.price}`);
+});
+```
+
+---
+
+### `getOtcHistoricalQuotes`
+
+Retrieve the history of past OTC quotes including their settlement status and trade IDs.
+
+**Required permissions:** Orders and trades — Query open orders & trades.
+
+```typescript
+getOtcHistoricalQuotes(params?: {
+  nonce?: number;
+}): Promise<OTCGetHistoricalQuotesResponse>
+```
+
+**Returns:** `OTCGetHistoricalQuotesResponse` — `{ result?: OtcHistoricalQuote[], error: string[] }`
+
+Each `OtcHistoricalQuote` contains: `quote_id`, `trade_id?`, `status?`, `base`, `quote`, `type`, `price`, `amount`, `total`, `settlement`, `settlement_status`, `acceptance.status`, `acceptance.time`, `client_order_id?`.
+
+```typescript
+const history = await client.getOtcHistoricalQuotes();
+history.result?.forEach((q) => {
+  console.log(`${q.quote_id} — status: ${q.status}, trade: ${q.trade_id}`);
+});
+```
+
+---
+
+### `updateOtcQuote`
+
+Accept or reject an active OTC quote. Call this after receiving a live quote from `createOtcQuoteRequest`.
+
+**Required permissions:** Orders and trades — Create & modify orders.
+
+```typescript
+updateOtcQuote(params: OTCUpdateQuoteParams): Promise<OTCUpdateQuoteResponse>
+```
+
+**Returns:** `OTCUpdateQuoteResponse` — `{ result?: { quote_id?: string }, error: string[] }`
+
+<ParamField body="quote_id" type="string" required>
+  The ID of the OTC quote to accept or reject.
+</ParamField>
+
+<ParamField body="status" type="string" required>
+  Action to take: `accepted` or `rejected`.
+</ParamField>
+
+```typescript
+// Accept a quote
+const accepted = await client.updateOtcQuote({
+  quote_id: 'abc123-quote-id',
+  status: 'accepted',
+});
+console.log('Accepted quote:', accepted.result?.quote_id);
+
+// Reject a quote
+await client.updateOtcQuote({
+  quote_id: 'abc123-quote-id',
+  status: 'rejected',
+});
+```
+
+---
+
+### `getOtcExposures`
+
+Retrieve the current maximum and used OTC exposure limits for your account.
+
+**Required permissions:** Orders and trades — Query open orders & trades.
+
+```typescript
+getOtcExposures(params?: { nonce?: number }): Promise<OTCGetExposuresResponse>
+```
+
+**Returns:** `OTCGetExposuresResponse` — `{ result?: { max_otc, max_rfq, used_otc, used_rfq }, error: string[] }`
+
+```typescript
+const exp = await client.getOtcExposures();
+console.log('Max OTC:', exp.result?.max_otc, '/ Used:', exp.result?.used_otc);
+console.log('Max RFQ:', exp.result?.max_rfq, '/ Used:', exp.result?.used_rfq);
+```
+
+---
+
+### `getOtcPairs`
+
+List all OTC trading pairs available to your account, including size limits and decimal precision.
+
+**Required permissions:** Funds permissions — Query and Funds permissions — Deposit.
+
+```typescript
+getOtcPairs(params?: { nonce?: number }): Promise<OTCGetPairsResponse>
+```
+
+**Returns:** `OTCGetPairsResponse` — `{ result: { spot_pairs: OtcPair[] }, error: string[] }`
+
+Each `OtcPair` contains: `base`, `quote`, `pair_name`, `pair_decimals`, `lot_decimals`, `cost_decimals`, `max_base_amount`, `max_notional?`, `min_base_amount?`, `min_notional?`.
+
+```typescript
+const pairs = await client.getOtcPairs();
+pairs.result.spot_pairs.forEach((p) => {
+  console.log(`${p.pair_name}: min=${p.min_base_amount}, max=${p.max_base_amount} ${p.base}`);
+});
+```
+
+---
+
+## OTC Full Flow Example
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: process.env.INSTITUTIONAL_API_KEY,
+  apiSecret: process.env.INSTITUTIONAL_API_SECRET,
+});
+
+async function executeOtcTrade() {
+  // 1. Check eligibility
+  const check = await client.checkOtcClient();
+  console.log('Permissions:', check.result?.permissions);
+
+  // 2. Review available pairs
+  const pairs = await client.getOtcPairs();
+  const btcUsd = pairs.result.spot_pairs.find((p) => p.pair_name === 'BTC/USD');
+  console.log('BTC/USD max:', btcUsd?.max_base_amount);
+
+  // 3. Request a quote
+  const quoteRes = await client.createOtcQuoteRequest({
+    base: 'BTC',
+    quote: 'USD',
+    type: 'buy',
+    amount: '1.0',
+  });
+  const quoteId = (quoteRes.result?.quote as any)?.quote_id;
+  console.log('Quote received:', quoteId);
+
+  // 4. Accept the quote
+  const accept = await client.updateOtcQuote({
+    quote_id: quoteId,
+    status: 'accepted',
+  });
+  console.log('Trade executed, quote_id:', accept.result?.quote_id);
+
+  // 5. Check historical record
+  const history = await client.getOtcHistoricalQuotes();
+  console.log('Recent trades:', history.result?.length);
+}
+
+executeOtcTrade().catch(console.error);
+```
+
+---
+
+## Custody
+
+The Custody API provides access to Kraken's institutional custody infrastructure: segregated vaults, transaction history, multi-party approval workflows, and deposit/withdrawal management.
+
+### `listCustodyVaults`
+
+Retrieve all vaults within your custody domain, with optional filtering, pagination, and ordering.
+
+```typescript
+listCustodyVaults(
+  params: CustodyListVaultsParams,
+): Promise<CustodyListVaultsResponse>
+```
+
+**Returns:** `CustodyListVaultsResponse` — `{ result?: CustodyVault[], errors?, start?, total? }`
+
+<ParamField body="resolve_policies" type="boolean">
+  Include policy information in the response.
+</ParamField>
+
+<ParamField body="filters" type="object">
+  Filter vaults by `id`, `name`, `default_approvals`, `created_at`, `updated_at`, or `member`. Uses a structured `{ and: [{ or: [...conditions] }] }` filter syntax.
+</ParamField>
+
+<ParamField body="pagination" type="object">
+  Pagination controls: `{ limit: number, offset: number }`.
+</ParamField>
+
+<ParamField body="orderings" type="array">
+  Sort results: `[{ by: 'name' | 'id' | 'created_at' | 'updated_at', direction?: 'asc' | 'desc' }]`.
+</ParamField>
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: 'insert_api_key_here',
+  apiSecret: 'insert_api_secret_here',
+});
+
+const vaults = await client.listCustodyVaults({
+  pagination: { limit: 10, offset: 0 },
+  orderings: [{ by: 'created_at', direction: 'desc' }],
+});
+vaults.result?.forEach((v) => {
+  console.log(`${v.name} (${v.id}): ${v.status}, balance: ${v.balance_fiat}`);
+});
+```
+
+---
+
+### `getCustodyVaultbyId`
+
+Retrieve detailed information and asset balances for a specific vault by its ID.
+
+```typescript
+getCustodyVaultbyId(params: {
+  id: string;
+  nonce?: number;
+}): Promise<CustodyGetVaultResponse>
+```
+
+**Returns:** `CustodyGetVaultResponse` — `{ result?: CustodyVaultWithAssets, errors: CustodyApiError[] }`
+
+The `CustodyVaultWithAssets` includes all `CustodyVault` fields plus `asset_details: CustodyVaultAssetDetail[]`, each containing `asset`, `current_usd_price?`, `available_balance`, and `total_balance`.
+
+```typescript
+const vault = await client.getCustodyVaultbyId({ id: 'vault-id-here' });
+console.log('Vault name:', vault.result?.name);
+vault.result?.asset_details.forEach((a) => {
+  console.log(`  ${a.asset}: ${a.total_balance.quantity} (${a.total_balance.current_usd_value} USD)`);
+});
+```
+
+---
+
+### `listCustodyTransactions`
+
+Retrieve the transaction history for a specified vault with optional type filtering, cursor-based pagination, and asset filtering.
+
+```typescript
+listCustodyTransactions(
+  params: CustodyListTransactionsParams,
+): Promise<CustodyListTransactionsResponse>
+```
+
+**Returns:** `CustodyListTransactionsResponse` — `{ result?: { transactions, stats?, next_cursor? }, errors }`
+
+<ParamField body="id" type="string" required>
+  The vault ID whose transaction history to retrieve.
+</ParamField>
+
+<ParamField body="types" type="string[]">
+  Filter by transaction types such as `deposit`, `withdrawal`, `trade`, `otc_buy`, `otc_sell`, `custody_transfer`, etc.
+</ParamField>
+
+<ParamField body="assets" type="array">
+  Filter by specific assets: `[{ asset: string, class: CustodyTransactionAssetClassReq }]`.
+</ParamField>
+
+<ParamField body="page_size" type="number">
+  Number of results per page.
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from a previous response's `next_cursor`.
+</ParamField>
+
+<ParamField body="sorting" type="object">
+  Sort order: `{ order: 'descending' | 'ascending' }`.
+</ParamField>
+
+```typescript
+const txs = await client.listCustodyTransactions({
+  id: 'vault-id-here',
+  types: ['deposit', 'withdrawal'],
+  page_size: 25,
+});
+txs.result?.transactions.forEach((tx) => {
+  console.log(`${tx.id}: ${tx.type} / ${tx.status} @ ${tx.time}`);
+});
+
+// Paginate
+if (txs.result?.next_cursor) {
+  const nextPage = await client.listCustodyTransactions({
+    id: 'vault-id-here',
+    cursor: txs.result.next_cursor,
+    page_size: 25,
+  });
+}
+```
+
+---
+
+### `getCustodyTransactionbyId`
+
+Retrieve a single custody transaction by its ID.
+
+```typescript
+getCustodyTransactionbyId(
+  params: CustodyGetTransactionParams,
+): Promise<CustodyGetTransactionResponse>
+```
+
+**Returns:** `CustodyGetTransactionResponse` — `{ result?: { transaction, result_type }, error }`
+
+<ParamField body="id" type="string" required>
+  Transaction ID to retrieve.
+</ParamField>
+
+<ParamField body="vault_id" type="string" required>
+  The vault the transaction belongs to.
+</ParamField>
+
+<ParamField body="with_long_timeout" type="boolean">
+  If `true`, allows a longer server-side timeout for complex lookups.
+</ParamField>
+
+```typescript
+const tx = await client.getCustodyTransactionbyId({
+  id: 'transaction-id-here',
+  vault_id: 'vault-id-here',
+});
+console.log('Transaction:', tx.result?.transaction.type, tx.result?.result_type);
+```
+
+---
+
+### `getCustodyDepositMethods`
+
+Retrieve the available deposit funding methods for a specific asset in a vault. The method name is required to generate deposit addresses.
+
+```typescript
+getCustodyDepositMethods(
+  params: CustodyDepositMethodsParams,
+): Promise<CustodyDepositMethodsResponse>
+```
+
+<ParamField body="x-vault-id" type="string" required>
+  The vault ID (passed as the `x-vault-id` HTTP header automatically by the SDK).
+</ParamField>
+
+<ParamField body="asset" type="string">
+  The asset to retrieve deposit methods for (e.g. `BTC`, `ETH`).
+</ParamField>
+
+<ParamField body="category" type="string" required>
+  Must be `custody`.
+</ParamField>
+
+```typescript
+const methods = await client.getCustodyDepositMethods({
+  'x-vault-id': 'vault-id-here',
+  asset: 'BTC',
+  category: 'custody',
+});
+methods.result?.forEach((m) => console.log('Method:', m.method));
+```
+
+---
+
+### `getCustodyDepositAddresses`
+
+Retrieve (or generate a new) deposit address for a given asset and deposit method in a vault.
+
+```typescript
+getCustodyDepositAddresses(
+  params: CustodyDepositAddressesParams,
+): Promise<CustodyDepositAddressesResponse>
+```
+
+<ParamField body="x-vault-id" type="string" required>
+  The vault ID.
+</ParamField>
+
+<ParamField body="asset" type="string" required>
+  The asset to deposit (e.g. `BTC`).
+</ParamField>
+
+<ParamField body="method" type="string" required>
+  The deposit method name obtained from `getCustodyDepositMethods`.
+</ParamField>
+
+<ParamField body="new" type="boolean">
+  If `true`, generates a fresh deposit address.
+</ParamField>
+
+```typescript
+const addresses = await client.getCustodyDepositAddresses({
+  'x-vault-id': 'vault-id-here',
+  asset: 'BTC',
+  method: 'Bitcoin',
+});
+addresses.result?.forEach((a) => console.log('Deposit address:', a.address, a.memo));
+```
+
+---
+
+### `getCustodyWithdrawMethods`
+
+List withdrawal methods available for a vault, optionally filtered by asset or network.
+
+```typescript
+getCustodyWithdrawMethods(
+  params: CustodyWithdrawMethodsParams,
+): Promise<CustodyWithdrawMethodsResponse>
+```
+
+<ParamField body="x-vault-id" type="string" required>
+  The vault ID.
+</ParamField>
+
+<ParamField body="asset" type="string">
+  Filter by asset (e.g. `ETH`).
+</ParamField>
+
+<ParamField body="category" type="string" required>
+  Must be `custody`.
+</ParamField>
+
+<ParamField body="network" type="string">
+  Filter by network ID.
+</ParamField>
+
+```typescript
+const methods = await client.getCustodyWithdrawMethods({
+  'x-vault-id': 'vault-id-here',
+  asset: 'ETH',
+  category: 'custody',
+});
+methods.result?.forEach((m) => {
+  console.log(`${m.method}: min=${m.minimum}, fee=${m.fee?.fee}`);
+});
+```
+
+---
+
+### `getCustodyWithdrawAddresses`
+
+List whitelisted withdrawal addresses for a vault.
+
+```typescript
+getCustodyWithdrawAddresses(
+  params: CustodyWithdrawAddressesParams,
+): Promise<CustodyWithdrawAddressesResponse>
+```
+
+<ParamField body="x-vault-id" type="string" required>
+  The vault ID.
+</ParamField>
+
+<ParamField body="asset" type="string">
+  Filter by asset.
+</ParamField>
+
+<ParamField body="method" type="string">
+  Filter by withdrawal method name.
+</ParamField>
+
+<ParamField body="verified" type="boolean">
+  If `true`, return only verified addresses.
+</ParamField>
+
+```typescript
+const addresses = await client.getCustodyWithdrawAddresses({
+  'x-vault-id': 'vault-id-here',
+  asset: 'BTC',
+  verified: true,
+});
+addresses.result?.forEach((a) => console.log('Withdraw address:', a.address, a.key));
+```
+
+---
+
+### `listCustodyActivities`
+
+Retrieve all custody task activities (audit trail entries) matching the specified filter criteria.
+
+```typescript
+listCustodyActivities(
+  params: CustodyListActivitiesParams,
+): Promise<CustodyListActivitiesResponse>
+```
+
+**Returns:** `CustodyListActivitiesResponse` — `{ result?: CustodyActivity[], errors, start, total }`
+
+<ParamField body="filters" type="object">
+  Structured filter on `id`, `scope`, `vault_id`, `task_id`, `approval_id`, `task_action`, `activity_action`, `created_at`, or `user`.
+</ParamField>
+
+<ParamField body="pagination" type="object">
+  `{ limit: number, offset: number }`
+</ParamField>
+
+```typescript
+const activities = await client.listCustodyActivities({
+  pagination: { limit: 20, offset: 0 },
+});
+console.log(`Total activities: ${activities.total}`);
+activities.result?.forEach((a) => console.log(a.id, a.created_at));
+```
+
+---
+
+### `getCustodyActivitybyId`
+
+Retrieve details for a specific custody activity.
+
+```typescript
+getCustodyActivitybyId(params: {
+  id: string;
+  nonce?: number;
+}): Promise<CustodyGetActivityResponse>
+```
+
+```typescript
+const activity = await client.getCustodyActivitybyId({ id: 'activity-id-here' });
+console.log('Activity type:', activity.result?.type);
+console.log('Actor:', activity.result?.user);
+```
+
+---
+
+### `listCustodyTasks`
+
+Retrieve review tasks (pending approval workflows) matching the specified criteria.
+
+```typescript
+listCustodyTasks(
+  params: CustodyListTasksParams,
+): Promise<CustodyListTasksResponse>
+```
+
+**Returns:** `CustodyListTasksResponse` — `{ result?: CustodyTask[], errors, start, total }`
+
+<ParamField body="filters" type="object">
+  Filter by `id`, `approval_id`, `vault_id`, `scope`, `state` (`pending`, `approved`, `denied`, `canceled`, `expired`, `executed`, `failed`), `action`, `created_at`, `updated_at`, `expires_at`, or `current_user_decision`.
+</ParamField>
+
+<ParamField body="pagination" type="object">
+  `{ limit: number, offset: number }`
+</ParamField>
+
+<ParamField body="orderings" type="array">
+  `[{ by: 'id' | 'vault_id' | 'state' | 'created_at' | 'updated_at' | 'expires_at', direction?: 'asc' | 'desc' }]`
+</ParamField>
+
+```typescript
+// List all pending tasks
+const tasks = await client.listCustodyTasks({
+  filters: {
+    and: [{ or: [{ type: 'equals', values: ['pending'], by: 'state' }] }],
+  },
+  pagination: { limit: 25, offset: 0 },
+});
+console.log(`Pending tasks: ${tasks.total}`);
+tasks.result?.forEach((t) => {
+  console.log(`Task ${t.id}: can_review=${t.can_review}, decision=${t.current_user_decision}`);
+});
+```
+
+---
+
+### `getCustodyTaskbyId`
+
+Retrieve the full details of a specific custody task.
+
+```typescript
+getCustodyTaskbyId(params: {
+  id: string;
+  nonce?: number;
+}): Promise<CustodyGetTaskResponse>
+```
+
+```typescript
+const task = await client.getCustodyTaskbyId({ id: 'task-id-here' });
+console.log('Task state:', task.result?.state);
+```
+
+---
+
+## Custody Full Flow Example
+
+```typescript
+import { InstitutionalClient } from '@siebly/kraken-api';
+
+const client = new InstitutionalClient({
+  apiKey: process.env.INSTITUTIONAL_API_KEY,
+  apiSecret: process.env.INSTITUTIONAL_API_SECRET,
+});
+
+async function custodyWorkflow() {
+  // 1. List vaults
+  const vaults = await client.listCustodyVaults({
+    pagination: { limit: 5, offset: 0 },
+  });
+  const vaultId = vaults.result?.[0]?.id!;
+  console.log('Using vault:', vaultId);
+
+  // 2. Inspect vault balances
+  const vault = await client.getCustodyVaultbyId({ id: vaultId });
+  console.log('Assets:', vault.result?.asset_details.map((a) => `${a.asset}: ${a.total_balance.quantity}`));
+
+  // 3. Get a BTC deposit address
+  const methods = await client.getCustodyDepositMethods({
+    'x-vault-id': vaultId,
+    asset: 'BTC',
+    category: 'custody',
+  });
+  const methodName = methods.result?.[0]?.method!;
+
+  const addresses = await client.getCustodyDepositAddresses({
+    'x-vault-id': vaultId,
+    asset: 'BTC',
+    method: methodName,
+  });
+  console.log('Deposit to:', addresses.result?.[0]?.address);
+
+  // 4. Review recent transactions
+  const txs = await client.listCustodyTransactions({
+    id: vaultId,
+    types: ['deposit', 'withdrawal'],
+    page_size: 10,
+  });
+  console.log(`Recent transactions: ${txs.result?.transactions.length}`);
+
+  // 5. Check pending tasks
+  const tasks = await client.listCustodyTasks({
+    pagination: { limit: 10, offset: 0 },
+  });
+  console.log(`Pending tasks: ${tasks.total}`);
+}
+
+custodyWorkflow().catch(console.error);
+```

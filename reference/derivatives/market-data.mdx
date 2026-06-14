@@ -1,0 +1,681 @@
+---
+title: "Derivatives Market Data Methods — DerivativesClient Reference"
+sidebarTitle: "Market Data"
+description: "Reference for all DerivativesClient public market data methods: instruments, tickers, order books, candles, fee schedules, funding rates, and execution events."
+---
+
+The `DerivativesClient` exposes a full suite of **public market data** methods for the Kraken Futures (Derivatives) API. None of the methods on this page require API key authentication — you can instantiate the client without credentials and call them freely. They cover instrument specifications, real-time ticker snapshots, full order-book depth, OHLCV candles, historical funding rates, fee schedules, and streaming-style market event history.
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+// No API keys needed for public data
+const client = new DerivativesClient();
+```
+
+---
+
+## Symbol conventions
+
+Kraken Futures symbols follow a structured prefix scheme that encodes the contract type:
+
+| Prefix | Description | Example |
+|--------|-------------|---------|
+| `PF_` | **Perpetual Futures** — no expiry, continuously funded | `PF_BTCUSD`, `PF_ETHUSD` |
+| `PI_` | **Perpetual Inverse Futures** — inverse-settled, no expiry | `PI_XBTUSD` |
+| `FI_` | **Fixed-term Inverse Futures** — inverse-settled with expiry | `FI_XBTUSD_250926` |
+| `FF_` | **Fixed-term Vanilla Futures** — USD-settled with expiry | `FF_BTCUSD_250926` |
+
+<Tip>
+  Use `getInstruments()` to retrieve the canonical list of all active symbols along with their contract specifications and type classifications.
+</Tip>
+
+---
+
+## Instruments
+
+### `getInstruments()`
+
+Returns specifications for all currently listed markets and indices — contract type, tick size, contract size, margin schedules, and more.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/instruments`
+- **Auth required:** No
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ instruments: FuturesInstrument[] }>>`
+
+```typescript
+const response = await client.getInstruments();
+
+for (const instrument of response.instruments) {
+  console.log(instrument.symbol, instrument.type, instrument.tradeable);
+  // e.g. "PF_BTCUSD" "flexible_futures" true
+}
+```
+
+---
+
+### `getInstrumentStatus(params)`
+
+Returns price dislocation and volatility details for a single market — whether it is currently experiencing dislocation or extreme volatility and in which direction.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/instruments/{symbol}/status`
+- **Auth required:** No
+
+<ParamField path="symbol" type="string" required>
+  The futures symbol to query, e.g. `PF_BTCUSD`.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesInstrumentStatus>>`
+
+```typescript
+const status = await client.getInstrumentStatus({ symbol: 'PF_BTCUSD' });
+
+console.log(status.experiencingDislocation);       // boolean
+console.log(status.priceDislocationDirection);     // "ABOVE_UPPER_BOUND" | "BELOW_LOWER_BOUND" | null
+console.log(status.experiencingExtremeVolatility); // boolean
+console.log(status.extremeVolatilityInitialMarginMultiplier); // number
+```
+
+---
+
+### `getInstrumentStatusList()`
+
+Returns price dislocation and volatility details for **all** listed markets in a single call.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/instruments/status`
+- **Auth required:** No
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ instrumentStatus: FuturesInstrumentStatus[] }>>`
+
+```typescript
+const response = await client.getInstrumentStatusList();
+
+for (const status of response.instrumentStatus) {
+  console.log(status.tradeable, status.experiencingDislocation);
+}
+```
+
+---
+
+## Tickers
+
+### `getTickers()`
+
+Returns current market data for **all** currently listed futures contracts and indices — prices, volumes, open interest, funding rates, and more.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/tickers`
+- **Auth required:** No
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ tickers: FuturesTicker[] }>>`
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient();
+
+const response = await client.getTickers();
+
+for (const ticker of response.tickers) {
+  console.log(ticker.symbol, ticker.markPrice, ticker.fundingRate);
+}
+```
+
+Key fields in each `FuturesTicker`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `symbol` | `string` | Contract symbol |
+| `last` | `number?` | Last fill price |
+| `markPrice` | `number` | Current mark price used for margining |
+| `bid` / `ask` | `number?` | Best bid and ask prices |
+| `vol24h` | `number` | 24-hour volume |
+| `openInterest` | `number` | Current open interest |
+| `fundingRate` | `number?` | Current funding rate (perpetuals only) |
+| `fundingRatePrediction` | `number?` | Predicted next funding rate (perpetuals only) |
+| `tag` | `string` | `perpetual`, `month`, `quarter`, or `semiannual` |
+| `suspended` | `boolean` | Whether the market is currently suspended |
+
+---
+
+### `getTicker(params)`
+
+Returns market data for a **single** futures contract or index by symbol.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/tickers/{symbol}`
+- **Auth required:** No
+
+<ParamField path="symbol" type="string" required>
+  The futures symbol to query, e.g. `PF_ETHUSD`.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ ticker: FuturesTicker }>>`
+
+```typescript
+const response = await client.getTicker({ symbol: 'PF_ETHUSD' });
+
+console.log(response.ticker.markPrice);
+console.log(response.ticker.fundingRate);
+```
+
+---
+
+## Order Book
+
+### `getOrderbook(params)`
+
+Returns the **complete non-cumulative order book** for a futures contract — all price levels on both sides.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/orderbook`
+- **Auth required:** No
+
+<ParamField query="symbol" type="string" required>
+  The futures contract symbol, e.g. `PF_ETHUSD`.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ orderBook: FuturesOrderBook }>>`
+
+The `FuturesOrderBook` contains:
+- `bids`: `[number, number][]` — `[price, size]` pairs, sorted descending by price
+- `asks`: `[number, number][]` — `[price, size]` pairs, sorted ascending by price
+
+```typescript
+const response = await client.getOrderbook({ symbol: 'PF_ETHUSD' });
+
+const { bids, asks } = response.orderBook;
+
+console.log('Best bid:', bids[0][0], '@', bids[0][1]);
+console.log('Best ask:', asks[0][0], '@', asks[0][1]);
+```
+
+---
+
+## Historical Funding Rates
+
+### `getHistoricalFundingRates(params)`
+
+Returns a list of historical funding rates for a given perpetual futures market.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/historical-funding-rates`
+- **Auth required:** No
+
+<ParamField query="symbol" type="string" required>
+  The perpetual futures symbol to query, e.g. `PF_BTCUSD`.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ rates: FuturesHistoricalFundingRate[] }>>`
+
+Each `FuturesHistoricalFundingRate` includes:
+- `fundingRate` — the absolute funding rate
+- `relativeFundingRate` — the funding rate relative to the mark price
+- `timestamp` — ISO 8601 timestamp of the funding event
+
+```typescript
+const response = await client.getHistoricalFundingRates({ symbol: 'PF_BTCUSD' });
+
+for (const rate of response.rates) {
+  console.log(rate.timestamp, rate.fundingRate, rate.relativeFundingRate);
+}
+```
+
+---
+
+## Candles
+
+### `getTickTypes()`
+
+Returns all available tick types that can be used with candle and chart endpoints.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/charts/v1/`
+- **Auth required:** No
+
+**Returns:** `Promise<FuturesTickType[]>`
+
+The three tick types are:
+- `trade` — candles built from actual trade prices
+- `mark` — candles built from the mark price (used for margining)
+- `spot` — candles built from the underlying spot index price
+
+```typescript
+const tickTypes = await client.getTickTypes();
+console.log(tickTypes); // ["trade", "mark", "spot"]
+```
+
+---
+
+### `getMarketsForTickType(params)`
+
+Returns the list of markets (symbols) available for a specific tick type.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/charts/v1/{tickType}`
+- **Auth required:** No
+
+<ParamField path="tickType" type="'spot' | 'mark' | 'trade'" required>
+  The tick type to query. Use `getTickTypes()` to enumerate available values.
+</ParamField>
+
+**Returns:** `Promise<string[]>`
+
+```typescript
+const markets = await client.getMarketsForTickType({ tickType: 'trade' });
+console.log(markets); // ["PF_BTCUSD", "PF_ETHUSD", ...]
+```
+
+---
+
+### `getResolutions(params)`
+
+Returns the candle resolutions available for a specific tick type and market.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/charts/v1/{tickType}/{symbol}`
+- **Auth required:** No
+
+<ParamField path="tickType" type="'spot' | 'mark' | 'trade'" required>
+  The tick type.
+</ParamField>
+
+<ParamField path="symbol" type="string" required>
+  The market symbol, e.g. `PF_ETHUSD`.
+</ParamField>
+
+**Returns:** `Promise<FuturesResolution[]>`
+
+Available resolutions: `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `12h`, `1d`, `1w`
+
+```typescript
+const resolutions = await client.getResolutions({
+  tickType: 'trade',
+  symbol: 'PF_ETHUSD',
+});
+console.log(resolutions); // ["1m", "5m", "15m", ...]
+```
+
+---
+
+### `getCandles(params)`
+
+Returns OHLCV candle data for a specific tick type, market, and resolution.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/charts/v1/{tickType}/{symbol}/{resolution}`
+- **Auth required:** No
+
+<ParamField path="tickType" type="'spot' | 'mark' | 'trade'" required>
+  The price series to base candles on.
+</ParamField>
+
+<ParamField path="symbol" type="string" required>
+  The market symbol, e.g. `PF_ETHUSD`.
+</ParamField>
+
+<ParamField path="resolution" type="'1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '12h' | '1d' | '1w'" required>
+  The candle interval.
+</ParamField>
+
+<ParamField query="from" type="number">
+  Start of range as epoch timestamp in **seconds**.
+</ParamField>
+
+<ParamField query="to" type="number">
+  End of range as epoch timestamp in **seconds**. Defaults to now.
+</ParamField>
+
+<ParamField query="count" type="number">
+  Maximum number of candles to return.
+</ParamField>
+
+**Returns:** `Promise<FuturesCandles>`
+
+The `FuturesCandles` response contains:
+- `candles`: array of `FuturesCandle` — each has `time` (epoch ms), `open`, `high`, `low`, `close` (as strings), and `volume` (number)
+- `more_candles`: `boolean` — `true` if additional candles are available beyond the returned set
+
+<Tabs>
+  <Tab title="Recent candles">
+    ```typescript
+    import { DerivativesClient } from '@siebly/kraken-api';
+
+    const client = new DerivativesClient();
+
+    const candles = await client.getCandles({
+      tickType: 'trade',
+      symbol: 'PF_ETHUSD',
+      resolution: '1h',
+    });
+
+    console.log(candles.candles.length, 'candles returned');
+    console.log('More available:', candles.more_candles);
+    ```
+  </Tab>
+  <Tab title="Time range">
+    ```typescript
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const sevenDaysAgo = nowSeconds - 86400 * 7;
+
+    const candles = await client.getCandles({
+      tickType: 'trade',
+      symbol: 'PF_ETHUSD',
+      resolution: '1h',
+      from: sevenDaysAgo,
+      to: nowSeconds,
+    });
+
+    for (const candle of candles.candles) {
+      console.log(new Date(candle.time), candle.open, candle.close);
+    }
+    ```
+  </Tab>
+  <Tab title="Mark price candles">
+    ```typescript
+    // Use mark price candles for margin-aware analysis
+    const markCandles = await client.getCandles({
+      tickType: 'mark',
+      symbol: 'PF_ETHUSD',
+      resolution: '5m',
+    });
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Fee Schedules
+
+<Note>
+  Both fee schedule endpoints are **deprecated** effective 2026-06-22. Use `SpotClient.getTradingVolume()` with a Spot API key instead.
+</Note>
+
+### `getFeeSchedules()`
+
+Lists all fee schedules with their maker/taker fee tiers by USD volume.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/feeschedules`
+- **Auth required:** No
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ feeSchedules: FuturesFeeSchedule[] }>>`
+
+```typescript
+const response = await client.getFeeSchedules();
+
+for (const schedule of response.feeSchedules) {
+  console.log(schedule.name, schedule.uid);
+  for (const tier of schedule.tiers) {
+    console.log(`  Volume ≥ $${tier.usdVolume}: maker ${tier.makerFee}, taker ${tier.takerFee}`);
+  }
+}
+```
+
+---
+
+### `getFeeScheduleVolumes()`
+
+Returns your personal fee schedule volumes for each fee schedule, determining which fee tier you qualify for.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/feeschedules/volumes`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ volumesByFeeSchedule: Record<string, number> }>>`
+
+```typescript
+const response = await client.getFeeScheduleVolumes();
+console.log(response.volumesByFeeSchedule);
+// { "some-fee-schedule-uid": 1250000 }
+```
+
+---
+
+## Market Event History
+
+These endpoints provide paginated access to public market event streams. All three share the same `FuturesMarketHistoryBaseParams` shape and support continuation-token pagination.
+
+<ParamField query="tradeable" type="string" required>
+  Symbol of the contract to query, e.g. `PF_ETHUSD`.
+</ParamField>
+
+<ParamField query="since" type="number">
+  Filter events after this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="before" type="number">
+  Filter events before this timestamp in milliseconds.
+</ParamField>
+
+<ParamField query="sort" type="'asc' | 'desc'">
+  Sort order. Defaults to `desc` (newest first).
+</ParamField>
+
+<ParamField query="count" type="number">
+  Maximum number of events to return per page.
+</ParamField>
+
+<ParamField query="continuation_token" type="string">
+  Base64 token from a previous response to fetch the next page.
+</ParamField>
+
+---
+
+### `getPublicExecutionEvents(params)`
+
+Lists public trade execution events for a market — every fill that occurred with its price, quantity, and timestamp.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/market/{tradeable}/executions`
+- **Auth required:** No
+
+**Returns:** `Promise<FuturesMarketHistoryResponse<FuturesPublicExecutionEvent>>`
+
+```typescript
+const response = await client.getPublicExecutionEvents({
+  tradeable: 'PF_ETHUSD',
+  sort: 'desc',
+  count: 100,
+});
+
+console.log(`Returned ${response.len} events`);
+if (response.continuationToken) {
+  // Fetch the next page
+  const page2 = await client.getPublicExecutionEvents({
+    tradeable: 'PF_ETHUSD',
+    continuation_token: response.continuationToken,
+  });
+}
+```
+
+---
+
+### `getPublicOrderEvents(params)`
+
+Lists public order-book events for a market — order placements, cancellations, and edits.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/market/{tradeable}/orders`
+- **Auth required:** No
+
+**Returns:** `Promise<FuturesMarketHistoryResponse<FuturesPublicOrderEvent>>`
+
+```typescript
+const response = await client.getPublicOrderEvents({
+  tradeable: 'PF_ETHUSD',
+  count: 50,
+});
+```
+
+---
+
+### `getPublicMarkPriceEvents(params)`
+
+Lists mark price change events for a market — useful for reconstructing the mark price timeline.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/history/v3/market/{tradeable}/price`
+- **Auth required:** No
+
+**Returns:** `Promise<FuturesMarketHistoryResponse<FuturesPublicMarkPriceEvent>>`
+
+Each `FuturesPublicMarkPriceEvent` contains a `uid`, `timestamp`, and an `event.price` string.
+
+```typescript
+const response = await client.getPublicMarkPriceEvents({
+  tradeable: 'PF_ETHUSD',
+  before: Date.now() - 3600000, // events from 1 hour ago
+});
+
+for (const element of response.elements) {
+  console.log(new Date(element.timestamp), element.event.price);
+}
+```
+
+---
+
+## Analytics
+
+### `getLiquidityPoolStatistic(params)`
+
+Returns liquidity pool statistics including USD value for a given pool and time range.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/charts/v1/analytics/liquidity-pool`
+- **Auth required:** No
+
+<ParamField query="symbol" type="string" required>
+  The pool code / symbol to query.
+</ParamField>
+
+<ParamField query="analyticsType" type="string" required>
+  The analytics type (e.g. `liquidity`).
+</ParamField>
+
+<ParamField query="since" type="number" required>
+  Start of time range as epoch timestamp in **seconds**.
+</ParamField>
+
+<ParamField query="interval" type="number" required>
+  Resolution in seconds. One of: `60`, `300`, `900`, `1800`, `3600`, `14400`, `43200`, `86400`, `604800`.
+</ParamField>
+
+<ParamField query="to" type="number">
+  End of time range in epoch seconds. Defaults to now.
+</ParamField>
+
+**Returns:** `Promise<FuturesAnalyticsResponse>`
+
+```typescript
+const stats = await client.getLiquidityPoolStatistic({
+  symbol: 'PF_ETHUSD',
+  analyticsType: 'liquidity',
+  since: Math.floor(Date.now() / 1000) - 86400,
+  interval: 3600,
+});
+
+console.log(stats.result.timestamp);
+console.log(stats.result.data);
+```
+
+---
+
+### `getMarketAnalytics(params)`
+
+Returns analytics data for a market divided into time buckets. Supports a wide range of analytics types including open interest, trade volume, long/short ratios, liquidation volume, and more.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `api/charts/v1/analytics/{symbol}/{analyticsType}`
+- **Auth required:** No
+
+<ParamField path="symbol" type="string" required>
+  The market symbol, e.g. `PF_ETHUSD`.
+</ParamField>
+
+<ParamField path="analyticsType" type="string" required>
+  One of: `open-interest`, `aggressor-differential`, `trade-volume`, `trade-count`, `liquidation-volume`, `rolling-volatility`, `long-short-ratio`, `long-short-info`, `cvd`, `top-traders`, `orderbook`, `spreads`, `liquidity`, `slippage`, `future-basis`.
+</ParamField>
+
+<ParamField query="since" type="number" required>
+  Start of time range as epoch timestamp in **seconds**.
+</ParamField>
+
+<ParamField query="interval" type="number" required>
+  Bucket size in seconds: `60`, `300`, `900`, `1800`, `3600`, `14400`, `43200`, `86400`, or `604800`.
+</ParamField>
+
+<ParamField query="to" type="number">
+  End of time range in epoch seconds. Defaults to now.
+</ParamField>
+
+**Returns:** `Promise<FuturesAnalyticsResponse>`
+
+```typescript
+const analytics = await client.getMarketAnalytics({
+  symbol: 'PF_ETHUSD',
+  analyticsType: 'open-interest',
+  since: Math.floor(Date.now() / 1000) - 86400 * 7,
+  interval: 3600, // hourly buckets
+});
+
+console.log(analytics.result.timestamp); // array of epoch timestamps
+console.log(analytics.result.more);      // true if more data is available
+```
+
+---
+
+## Portfolio Margin (DEMO only)
+
+<Note>
+  The following two methods are currently available **exclusively in the Kraken Futures DEMO environment** and are not available in production.
+</Note>
+
+### `getPortfolioMarginParameters()`
+
+Retrieves the current portfolio margin calculation parameters, including user-specific limits related to options trading.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/portfolio-margining/parameters`
+- **Auth required:** Yes
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesPortfolioMarginParameters>>`
+
+```typescript
+const params = await client.getPortfolioMarginParameters();
+
+console.log(params.crossAssetNettingFactor);
+console.log(params.priceShockLevels);
+console.log(params.optionsUserLimits.maxNetPositionDelta);
+```
+
+---
+
+### `simulateMarginRequirements(params)`
+
+For a given portfolio of balances and positions (futures and options), calculates the margin requirements, PnL, and option greeks.
+
+- **HTTP method:** `POST`
+- **Endpoint:** `derivatives/api/v3/portfolio-margining/simulate`
+- **Auth required:** Yes
+
+<ParamField body="json" type="object" required>
+  Complex portfolio simulation payload. Refer to the Kraken Futures API documentation for the full schema.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<FuturesPortfolioSimulation>>`
+
+```typescript
+const simulation = await client.simulateMarginRequirements({
+  json: {
+    // portfolio positions and balances payload
+  },
+});
+
+console.log(simulation.maintenanceMargin);
+console.log(simulation.initialMargin);
+console.log(simulation.pnl);
+```

@@ -1,0 +1,304 @@
+---
+title: "Production Deployment Tips for Kraken API Integrations"
+sidebarTitle: "Production Tips"
+description: "Best practices for running @siebly/kraken-api in production: client-side order IDs, reconnect handling, symbol conventions, credential security, and rollout strategy."
+---
+
+Moving from a working integration to a production-grade one involves a handful of deliberate choices that pay compounding dividends over time. The patterns below reflect what matters most when your code is running live, where a silent assumption or a poorly handled reconnect can translate directly into missed fills, duplicate orders, or exposure you didn't intend. Work through them before your first live trade.
+
+## Use client-generated order IDs
+
+Every order you place should carry a client-assigned ID that your system generates before the request leaves your process. This makes retries idempotent: if a request times out and you don't know whether Kraken received it, you can query by your own ID rather than guessing. It also gives you a durable correlation key across REST responses, WebSocket execution events, and your own internal records.
+
+The SDK exposes `generateNewOrderID()` on both `SpotClient` and `DerivativesClient`. The parameter name differs between products:
+
+- **Spot REST / WebSocket API**: `cl_ord_id`
+- **Futures (Derivatives)**: `cliOrdId`
+
+```typescript
+import { SpotClient, DerivativesClient } from '@siebly/kraken-api';
+
+// --- Spot ---
+const spotClient = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+const spotOrderId = spotClient.generateNewOrderID();
+
+const spotResult = await spotClient.submitOrder({
+  ordertype: 'limit',
+  type: 'buy',
+  pair: 'XBTUSD',
+  volume: '0.0001',
+  price: '10000',
+  cl_ord_id: spotOrderId, // ← your reference, survives retries
+});
+
+console.log('Spot order placed, cl_ord_id:', spotOrderId, spotResult);
+
+// --- Futures ---
+const futuresClient = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY!,
+  apiSecret: process.env.API_FUTURES_SECRET!,
+});
+
+const futuresOrderId = futuresClient.generateNewOrderID();
+
+const futuresResult = await futuresClient.submitOrder({
+  orderType: 'lmt',
+  symbol: 'PF_ETHUSD',
+  side: 'buy',
+  size: 0.01,
+  limitPrice: 1000,
+  cliOrdId: futuresOrderId, // ← your reference for Futures
+});
+
+console.log('Futures order placed, cliOrdId:', futuresOrderId, futuresResult);
+```
+
+Store the generated ID in your own database before sending the order. If the network call fails and you cannot confirm whether Kraken received it, query the order by that ID to determine the true state before retrying.
+
+## Handle reconnects gracefully
+
+WebSocket connections drop. This happens more frequently during high-volatility market sessions, exchange maintenance windows, or transient network interruptions. The SDK detects disconnections via heartbeat timeouts and handles reconnection automatically — reopening the connection, re-authenticating if needed, and resubscribing to all previously active topics. Your job is to keep your application state coherent across the gap.
+
+The SDK emits two events that bracket the reconnect window:
+
+```typescript
+import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+ws.on('reconnecting', (data) => {
+  console.warn('Connection lost — reconnecting', data?.wsKey);
+
+  // Pause all order management activity.
+  // Do not place, amend, or cancel orders until reconnected.
+  // Any order action during this window risks acting on stale state.
+  pauseOrderManagement();
+});
+
+ws.on('reconnected', (data) => {
+  console.info('Reconnected and resubscribed', data?.wsKey);
+
+  // The WebSocket is live again, but you may have missed events.
+  // Backfill current state via REST before resuming.
+  backfillAccountState()
+    .then(() => resumeOrderManagement())
+    .catch((err) => console.error('Backfill failed:', err));
+});
+
+ws.on('exception', (data) => {
+  console.error('WebSocket exception:', data);
+});
+
+ws.subscribe(
+  {
+    topic: 'executions',
+    payload: { snap_trades: true, snap_orders: true },
+  },
+  WS_KEY_MAP.spotPrivateV2,
+);
+```
+
+The `reconnecting` → `reconnected` cycle is a normal operating condition, not an error. Design your backfill logic to be fast and reliable: query open orders, current positions, and recent fills via REST as soon as `reconnected` fires, hydrate your internal state, and only then re-enable order placement.
+
+## Rollout strategy
+
+Introducing a new integration to a live system is safest when done in layers. Each layer validates the previous one before you increase surface area or financial exposure:
+
+<Steps>
+  <Step title="Public REST APIs">
+    Start with unauthenticated endpoints: server time, system status, tickers, order books. This confirms your network routing, proxy configuration (if any), and basic response parsing without any credential risk.
+
+    ```typescript
+    const client = new SpotClient();
+    const status = await client.getSystemStatus();
+    console.log('System status:', status);
+    ```
+  </Step>
+
+  <Step title="Public WebSocket streams">
+    Subscribe to public topics (`ticker`, `book`, `trade`) and confirm that events flow correctly, reconnect handling fires as expected, and your message processing logic handles the data shape correctly.
+
+    ```typescript
+    const ws = new WebsocketClient();
+    ws.on('message', (data) => console.log('WS message:', data));
+    ws.subscribe(
+      { topic: 'ticker', payload: { symbol: ['BTC/USD'] } },
+      WS_KEY_MAP.spotPublicV2,
+    );
+    ```
+  </Step>
+
+  <Step title="Private account streams">
+    Add credentials and subscribe to private topics (`executions`, `balances`). Confirm authentication succeeds, the `authenticated` event fires, and account state updates arrive correctly. Do not place any orders yet.
+
+    ```typescript
+    const ws = new WebsocketClient({
+      apiKey: process.env.API_SPOT_KEY!,
+      apiSecret: process.env.API_SPOT_SECRET!,
+    });
+    ws.on('authenticated', (data) => console.log('Authenticated:', data?.wsKey));
+    ws.subscribe(
+      { topic: 'executions', payload: { snap_orders: true } },
+      WS_KEY_MAP.spotPrivateV2,
+    );
+    ```
+  </Step>
+
+  <Step title="Validated orders">
+    Use `validate: true` on Spot orders to test your order construction logic without submitting live orders. For Futures, use `testnet: true` on `DerivativesClient` to route to Kraken's demo environment.
+
+    ```typescript
+    // Spot: validate without sending
+    await spotClient.submitOrder({
+      ordertype: 'limit',
+      type: 'buy',
+      pair: 'XBTUSD',
+      volume: '0.0001',
+      price: '10000',
+      validate: true, // ← does NOT place a real order
+      cl_ord_id: spotClient.generateNewOrderID(),
+    });
+
+    // Futures: use demo environment
+    const demoClient = new DerivativesClient({
+      apiKey: process.env.API_FUTURES_KEY!,
+      apiSecret: process.env.API_FUTURES_SECRET!,
+      testnet: true, // ← routes to demo-futures.kraken.com
+    });
+    ```
+  </Step>
+
+  <Step title="Small live trades">
+    Remove `validate: true` (or `testnet: true`) and place the smallest permissible live order. Verify the fill arrives on your WebSocket stream, your internal state updates correctly, and your reconciliation logic produces accurate records.
+  </Step>
+</Steps>
+
+## Symbol conventions
+
+Spot and Futures use different symbol formats, and they are not interchangeable. Mixing them up silently produces wrong results — your code may accept the string without complaining but route the request to the wrong instrument or fail with a confusing exchange error.
+
+| Product | Context | Format | Examples |
+|---|---|---|---|
+| Spot | REST API | Kraken pair notation | `XBTUSD`, `ETHUSD`, `XBTZEUR` |
+| Spot | WebSocket V2 | `BASE/QUOTE` slash notation | `BTC/USD`, `ETH/USD`, `XBT/EUR` |
+| Futures | REST & WebSocket | Prefixed instrument names | `PF_XBTUSD` (perpetual), `PI_ETHUSD` (inverse perpetual), `FF_XBTUSD` (fixed-date) |
+
+```typescript
+// Spot REST — use Kraken pair notation
+const ticker = await spotClient.getTicker({ pair: 'XBTUSD' });
+
+// Spot WebSocket — use slash notation
+ws.subscribe(
+  { topic: 'ticker', payload: { symbol: ['BTC/USD', 'ETH/USD'] } },
+  WS_KEY_MAP.spotPublicV2,
+);
+
+// Futures REST — use prefixed instrument name
+const futuresTicker = await futuresClient.getTicker({ symbol: 'PF_XBTUSD' });
+
+// Futures WebSocket — same prefixed format
+ws.subscribe(
+  { topic: 'trade', payload: { product_ids: ['PI_XBTUSD', 'PI_ETHUSD'] } },
+  WS_KEY_MAP.derivativesPublicV1,
+);
+```
+
+Build explicit symbol mapping into your system if it needs to handle multiple products. Do not assume that a symbol string that works in one context will work in another.
+
+## Credential security
+
+### Minimum required permissions
+
+Kraken API keys support granular permission sets. Grant only what each key actually needs:
+
+| Use case | Required permissions |
+|---|---|
+| Market data only | None (public endpoints) |
+| Account balance queries | Query funds |
+| Order queries | Query open orders & trades |
+| Order placement | Orders and trades |
+| Withdrawals | Withdraw funds — only if explicitly required |
+
+Never enable withdrawal permissions on a trading bot's API key. A compromised trading key can place bad orders; a compromised key with withdrawal permissions can drain funds.
+
+### IP whitelisting
+
+Lock each API key to the IP address (or CIDR range) of the server that uses it. Kraken supports this in the API key management panel. A stolen key that cannot originate requests from your server's IP is useless to an attacker.
+
+### Key rotation
+
+Treat API keys like passwords: rotate them periodically, and immediately upon any suspicion of compromise. The rotation process is:
+
+1. Create a new key with the same permissions as the one being replaced.
+2. Update your environment variables or secrets manager with the new credentials.
+3. Restart your service to pick up the new credentials.
+4. Revoke the old key in the Kraken API management panel.
+
+### Environment variables, not hardcoded strings
+
+Never place API credentials in source code or commit them to version control. Use environment variables and a secrets manager in production:
+
+```bash
+# Set in your deployment environment, not in .env files committed to git
+export API_SPOT_KEY='your-spot-api-key'
+export API_SPOT_SECRET='your-spot-api-secret'
+
+export API_FUTURES_KEY='your-futures-api-key'
+export API_FUTURES_SECRET='your-futures-api-secret'
+```
+
+```typescript
+// Read from environment at runtime
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+```
+
+For Node.js 20+, `--env-file` loads a `.env` file without a third-party dependency:
+
+```bash
+node --env-file=.env dist/bot.js
+```
+
+Keep your `.env` file out of version control with a `.gitignore` entry.
+
+## Proxy support
+
+If your production environment requires outbound HTTP traffic to route through a proxy — common in corporate networks, VPCs with restricted egress, or compliance-controlled environments — pass `proxy` (or a fully configured `httpsAgent`) via the `networkOptions` second argument to any REST client constructor:
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient(
+  {
+    apiKey: process.env.API_SPOT_KEY!,
+    apiSecret: process.env.API_SPOT_SECRET!,
+  },
+  {
+    // axios proxy config — matches AxiosRequestConfig
+    proxy: {
+      host: '10.0.0.1',
+      port: 3128,
+      // Optional: proxy auth
+      auth: {
+        username: process.env.PROXY_USER!,
+        password: process.env.PROXY_PASS!,
+      },
+    },
+  },
+);
+```
+
+The second argument is passed directly to `axios` as `AxiosRequestConfig`, so any configuration option supported by axios (custom `httpsAgent`, per-request timeouts, custom headers) is available here.
+
+<Tip>
+Use `validate: true` on Spot orders during development to test your order construction logic end-to-end without placing real orders. Use `testnet: true` on `DerivativesClient` to route Futures REST calls to Kraken's demo environment (`demo-futures.kraken.com`) — this is the closest analogue to a live environment for Futures without risking real capital.
+</Tip>

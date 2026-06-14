@@ -1,0 +1,580 @@
+---
+title: "Spot Market Data Methods — SpotClient REST Reference"
+sidebarTitle: "Market Data"
+description: "Reference for all SpotClient public market data methods: system status, asset info, asset pairs, tickers, candles, order book, recent trades, and spreads."
+---
+
+The `SpotClient` exposes a suite of **public market data methods** that require no authentication. You can call these endpoints immediately after constructing a client — no API key or secret is needed. These methods cover everything from system health checks to real-time order book snapshots, giving you all the market context required to build trading strategies, dashboards, and data pipelines.
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+// Public methods work without credentials
+const client = new SpotClient();
+```
+
+---
+
+## `getSystemStatus()`
+
+Get the current system status or trading mode.
+
+**Signature**
+
+```typescript
+getSystemStatus(): Promise<SpotAPISuccessResponse<SpotSystemStatus>>
+```
+
+<ParamField path="—" type="none">
+  This method takes no parameters.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/SystemStatus` |
+| **Auth required** | No |
+
+**Response shape**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | `'online' \| 'maintenance' \| 'cancel_only' \| 'post_only'` | Current trading mode |
+| `timestamp` | `string` | ISO 8601 timestamp |
+
+<CodeGroup>
+```typescript TypeScript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const status = await client.getSystemStatus();
+console.log(status.result.status);     // e.g. 'online'
+console.log(status.result.timestamp);  // e.g. '2024-01-15T10:30:00Z'
+```
+</CodeGroup>
+
+<Note>
+  Check `status` before placing orders. The exchange may be in `cancel_only` (no new orders) or `post_only` (only maker orders) mode during degraded conditions.
+</Note>
+
+---
+
+## `getAssetInfo(params?)`
+
+Get information about the assets that are available for deposit, withdrawal, trading, and earn.
+
+**Signature**
+
+```typescript
+getAssetInfo(params?: {
+  asset?: string;
+  aclass?: 'currency' | 'tokenized_asset';
+}): Promise<SpotAPISuccessResponse<Record<string, SpotAssetInfo>>>
+```
+
+<ParamField query="asset" type="string">
+  Comma-delimited list of assets to filter by (e.g. `"XBT,ETH"`). Omit to return all assets.
+</ParamField>
+
+<ParamField query="aclass" type="'currency' | 'tokenized_asset'">
+  Asset class filter. Defaults to `currency`.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/Assets` |
+| **Auth required** | No |
+
+**Response shape** — `Record<string, SpotAssetInfo>`
+
+Each key is an asset identifier (e.g. `"XXBT"`), and the value contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `aclass` | `string` | Asset class |
+| `altname` | `string` | Alternate asset name |
+| `decimals` | `number` | Scaling decimal places for record keeping |
+| `display_decimals` | `number` | Scaling decimal places for display purposes |
+| `collateral_value` | `number?` | Collateral value used in margin |
+| `status` | `string?` | Asset status |
+
+<CodeGroup>
+```typescript All Assets
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+// Return all available assets
+const allAssets = await client.getAssetInfo();
+console.log(allAssets.result);
+```
+
+```typescript Filtered Assets
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+// Return only Bitcoin and Ethereum info
+const assetInfo = await client.getAssetInfo({
+  asset: 'XBT,ETH',
+});
+console.log(assetInfo.result);
+```
+</CodeGroup>
+
+---
+
+## `getAssetPairs(params?)`
+
+Get tradable asset pairs and their detailed specifications including fees, precision, and leverage settings.
+
+**Signature**
+
+```typescript
+getAssetPairs(
+  params?: SpotGetAssetPairsParams
+): Promise<SpotAPISuccessResponse<Record<string, SpotAssetPair>>>
+```
+
+<ParamField query="pair" type="string">
+  Comma-delimited list of asset pairs to query (e.g. `"XBTUSD,ETHUSD"`). Omit to return all pairs.
+</ParamField>
+
+<ParamField query="info" type="'info' | 'leverage' | 'fees' | 'margin'">
+  Info to retrieve. Defaults to `info` (full pair data).
+</ParamField>
+
+<ParamField query="aclass_base" type="'currency' | 'tokenized_asset'">
+  Filter pairs by base asset class.
+</ParamField>
+
+<ParamField query="country_code" type="string">
+  Two-letter country code to filter pairs available in that region.
+</ParamField>
+
+<ParamField query="execution_venue" type="string">
+  Filter by execution venue.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/AssetPairs` |
+| **Auth required** | No |
+
+**Key response fields** — `Record<string, SpotAssetPair>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `altname` | `string` | Alternate pair name |
+| `wsname` | `string?` | WebSocket pair name |
+| `base` | `string` | Base asset |
+| `quote` | `string` | Quote asset |
+| `pair_decimals` | `number` | Decimal places for pair |
+| `lot_decimals` | `number` | Decimal places for volume |
+| `ordermin` | `string` | Minimum order size |
+| `costmin` | `string?` | Minimum order cost |
+| `tick_size` | `string?` | Minimum price increment |
+| `fees` | `number[][]?` | Taker fee schedule `[volume, percent_fee]` |
+| `fees_maker` | `number[][]?` | Maker fee schedule |
+| `leverage_buy` | `number[]?` | Available buy leverage |
+| `leverage_sell` | `number[]?` | Available sell leverage |
+
+<CodeGroup>
+```typescript Specific Pairs
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const pairs = await client.getAssetPairs({
+  pair: 'XBTUSD,ETHUSD',
+});
+console.log(pairs.result);
+```
+
+```typescript Fee Info Only
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+// Retrieve only fee schedules
+const fees = await client.getAssetPairs({
+  pair: 'XBTUSD',
+  info: 'fees',
+});
+console.log(fees.result);
+```
+</CodeGroup>
+
+<Tip>
+  Use `getAssetPairs()` to verify `ordermin`, `costmin`, and `tick_size` before submitting orders. Order validation errors are often caused by violating these constraints.
+</Tip>
+
+---
+
+## `getTicker(params?)`
+
+Get ticker information for all or requested markets. Today's prices start at midnight UTC.
+
+**Signature**
+
+```typescript
+getTicker(params?: {
+  pair?: string;
+  asset_class?: 'tokenized_asset' | 'forex';
+}): Promise<SpotAPISuccessResponse<Record<string, SpotAssetTickerInfo>>>
+```
+
+<ParamField query="pair" type="string">
+  Asset pair to get ticker for (e.g. `"XBTUSD"`). Leaving this blank returns tickers for all tradeable assets on Kraken.
+</ParamField>
+
+<ParamField query="asset_class" type="'tokenized_asset' | 'forex'">
+  Filter by asset class.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/Ticker` |
+| **Auth required** | No |
+
+**Response shape** — `Record<string, SpotAssetTickerInfo>`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `a` | `string[]` | Ask `[price, whole lot volume, lot volume]` |
+| `b` | `string[]` | Bid `[price, whole lot volume, lot volume]` |
+| `c` | `string[]` | Last trade closed `[price, lot volume]` |
+| `v` | `string[]` | Volume `[today, last 24 hours]` |
+| `p` | `string[]` | Volume weighted average price `[today, last 24 hours]` |
+| `t` | `number[]` | Number of trades `[today, last 24 hours]` |
+| `l` | `string[]` | Low `[today, last 24 hours]` |
+| `h` | `string[]` | High `[today, last 24 hours]` |
+| `o` | `string` | Today's opening price |
+
+<CodeGroup>
+```typescript Single Pair
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const ticker = await client.getTicker({ pair: 'XBTUSD' });
+const xbtUsd = ticker.result['XXBTZUSD'];
+
+console.log('Last price:', xbtUsd.c[0]);
+console.log('24h high:',  xbtUsd.h[1]);
+console.log('24h volume:', xbtUsd.v[1]);
+```
+
+```typescript All Tickers
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+// No pair param → returns all tradeable pairs
+const allTickers = await client.getTicker();
+console.log(allTickers.result);
+```
+</CodeGroup>
+
+---
+
+## `getCandles(params)`
+
+Retrieve OHLC (Open/High/Low/Close) candlestick data. Returns up to **720** of the most recent entries. The last entry in the array represents the current, not-yet-committed timeframe and is always present.
+
+**Signature**
+
+```typescript
+getCandles(
+  params: SpotGetOHLCParams
+): Promise<SpotAPISuccessResponse<SpotOHLCResponse>>
+```
+
+<ParamField query="pair" type="string" required>
+  Asset pair to get OHLC data for (e.g. `"XBTUSD"`).
+</ParamField>
+
+<ParamField query="interval" type="1 | 5 | 15 | 30 | 60 | 240 | 1440 | 10080 | 21600">
+  Time frame interval in minutes. Defaults to `1`.
+
+  | Value | Label |
+  |-------|-------|
+  | `1` | 1 minute |
+  | `5` | 5 minutes |
+  | `15` | 15 minutes |
+  | `30` | 30 minutes |
+  | `60` | 1 hour |
+  | `240` | 4 hours |
+  | `1440` | 1 day |
+  | `10080` | 1 week |
+  | `21600` | 15 days |
+</ParamField>
+
+<ParamField query="since" type="number">
+  Unix timestamp to get OHLC data from. Note: this does not filter results — it controls which cached dataset is used as the starting point.
+</ParamField>
+
+<ParamField query="asset_class" type="'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/OHLC` |
+| **Auth required** | No |
+
+**Response shape** — `SpotOHLCResponse`
+
+Each OHLC entry is a tuple: `[time, open, high, low, close, vwap, volume, count]`
+
+| Index | Type | Description |
+|-------|------|-------------|
+| `0` | `number` | Unix timestamp |
+| `1` | `string` | Open price |
+| `2` | `string` | High price |
+| `3` | `string` | Low price |
+| `4` | `string` | Close price |
+| `5` | `string` | Volume weighted average price |
+| `6` | `string` | Volume |
+| `7` | `number` | Trade count |
+
+<CodeGroup>
+```typescript 1-Hour Candles
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const candles = await client.getCandles({
+  pair: 'XBTUSD',
+  interval: 60, // 1-hour candles
+});
+
+const ohlcData = candles.result['XXBTZUSD'];
+console.log('Last candle:', ohlcData[ohlcData.length - 1]);
+// [time, open, high, low, close, vwap, volume, count]
+```
+
+```typescript Daily Candles with Since
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const sevenDaysAgo = Math.floor(Date.now() / 1000) - 86400 * 7;
+
+const candles = await client.getCandles({
+  pair: 'XBTUSD',
+  interval: 1440, // 1-day candles
+  since: sevenDaysAgo,
+});
+
+console.log('Last timestamp:', candles.result.last);
+```
+</CodeGroup>
+
+---
+
+## `getOrderBook(params)`
+
+Returns the Level 2 (L2) order book, showing individual price levels with aggregated order quantities.
+
+**Signature**
+
+```typescript
+getOrderBook(
+  params: SpotGetOrderBookParams
+): Promise<SpotAPISuccessResponse<SpotOrderBookResponse>>
+```
+
+<ParamField query="pair" type="string" required>
+  Asset pair to get order book for (e.g. `"XBTUSD"`).
+</ParamField>
+
+<ParamField query="count" type="number">
+  Maximum number of asks/bids to return. Range: 1–500. Defaults to 100.
+</ParamField>
+
+<ParamField query="asset_class" type="'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/Depth` |
+| **Auth required** | No |
+
+**Response shape** — `SpotOrderBookResponse`
+
+Each book entry is a tuple: `[price, volume, timestamp]`
+
+```typescript
+interface SpotOrderBook {
+  asks: [string, string, number][]; // [price, volume, timestamp]
+  bids: [string, string, number][]; // [price, volume, timestamp]
+}
+```
+
+<CodeGroup>
+```typescript Top 10 Levels
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const book = await client.getOrderBook({
+  pair: 'XBTUSD',
+  count: 10,
+});
+
+const xbtBook = book.result['XXBTZUSD'];
+console.log('Best ask:', xbtBook.asks[0]); // [price, volume, timestamp]
+console.log('Best bid:', xbtBook.bids[0]); // [price, volume, timestamp]
+```
+</CodeGroup>
+
+---
+
+## `getRecentTrades(params)`
+
+Returns recent trades. By default, returns the last 1000 trades.
+
+**Signature**
+
+```typescript
+getRecentTrades(
+  params: SpotGetRecentTradesParams
+): Promise<SpotAPISuccessResponse<SpotRecentTradesResponse>>
+```
+
+<ParamField query="pair" type="string" required>
+  Asset pair to get recent trades for (e.g. `"XBTUSD"`).
+</ParamField>
+
+<ParamField query="since" type="string">
+  Return trades after this trade ID (from a previous response's `last` field).
+</ParamField>
+
+<ParamField query="count" type="number">
+  Maximum number of trades to return. Range: 1–1000. Defaults to 1000.
+</ParamField>
+
+<ParamField query="asset_class" type="'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/Trades` |
+| **Auth required** | No |
+
+**Response shape** — `SpotRecentTradesResponse`
+
+Each trade entry is a tuple: `[price, volume, time, buy/sell, market/limit, miscellaneous, trade_id]`
+
+| Index | Type | Description |
+|-------|------|-------------|
+| `0` | `string` | Price |
+| `1` | `string` | Volume |
+| `2` | `number` | Timestamp |
+| `3` | `string` | `"b"` (buy) or `"s"` (sell) |
+| `4` | `string` | `"m"` (market) or `"l"` (limit) |
+| `5` | `string` | Miscellaneous flags |
+| `6` | `number` | Trade ID |
+
+<CodeGroup>
+```typescript Recent Trades
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const trades = await client.getRecentTrades({
+  pair: 'XBTUSD',
+  count: 10,
+});
+
+const tradeList = trades.result['XXBTZUSD'];
+console.log('Last 10 trades:', tradeList);
+console.log('Last trade ID:', trades.result.last);
+```
+
+```typescript Paginate from Last ID
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+// First page
+const first = await client.getRecentTrades({ pair: 'XBTUSD' });
+const lastId = first.result.last as string;
+
+// Next page — trades after lastId
+const next = await client.getRecentTrades({
+  pair: 'XBTUSD',
+  since: lastId,
+});
+console.log('Next page:', next.result['XXBTZUSD']);
+```
+</CodeGroup>
+
+---
+
+## `getRecentSpreads(params)`
+
+Returns the last ~200 top-of-book bid/ask spreads for a given pair.
+
+**Signature**
+
+```typescript
+getRecentSpreads(
+  params: SpotGetRecentSpreadsParams
+): Promise<SpotAPISuccessResponse<SpotRecentSpreadsResponse>>
+```
+
+<ParamField query="pair" type="string" required>
+  Asset pair to get spread data for (e.g. `"XBTUSD"`).
+</ParamField>
+
+<ParamField query="since" type="number">
+  Unix timestamp to return spreads from. Used for incremental data fetches.
+</ParamField>
+
+<ParamField query="asset_class" type="'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/Spread` |
+| **Auth required** | No |
+
+**Response shape** — `SpotRecentSpreadsResponse`
+
+Each spread entry is a tuple: `[time, bid, ask]`
+
+<CodeGroup>
+```typescript Current Spread
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const spreads = await client.getRecentSpreads({ pair: 'XBTUSD' });
+const spreadData = spreads.result['XXBTZUSD'] as [number, string, string][];
+
+const latest = spreadData[spreadData.length - 1];
+console.log('Time:', latest[0]);
+console.log('Bid:', latest[1]);
+console.log('Ask:', latest[2]);
+
+// Use result.last for incremental fetches
+console.log('Last timestamp:', spreads.result.last);
+```
+</CodeGroup>
+
+<Tip>
+  Store the `last` timestamp from each response and pass it as `since` in your next call to receive only new spread entries — ideal for efficient polling.
+</Tip>

@@ -1,0 +1,70 @@
+---
+title: "Kraken API SDK for Node.js and TypeScript"
+sidebarTitle: "Introduction"
+description: "@siebly/kraken-api is a complete, production-tested SDK for Kraken's REST APIs and WebSockets, with TypeScript support and automatic reconnection for Node.js."
+---
+
+`@siebly/kraken-api` is a complete, production-tested Node.js and TypeScript SDK for Kraken's REST APIs and WebSockets. It gives developers a single, unified integration layer for Spot trading, Derivatives (Futures), institutional operations, partner workflows, and real-time market and account data streaming — without hand-rolling request signing, WebSocket authentication, heartbeat handling, or reconnect logic. Whether you are building your first trading bot or maintaining a production execution service, the SDK covers the full Kraken API surface with strong TypeScript types and a consistent promise-driven interface.
+
+## Clients
+
+The SDK ships six exported clients, each targeting a distinct part of the Kraken API surface.
+
+<CardGroup cols={2}>
+  <Card title="SpotClient" icon="chart-candlestick" href="/rest/spot-client">
+    Full coverage of Kraken's Spot REST API — market data, account management, order placement, staking, and batch operations.
+  </Card>
+  <Card title="DerivativesClient" icon="chart-line" href="/rest/derivatives-client">
+    Futures REST API client for Kraken's Derivatives platform, with optional testnet support for safe integration testing.
+  </Card>
+  <Card title="InstitutionalClient" icon="building-columns" href="/rest/institutional-client">
+    REST client for institutional trading and custody workflows on the Kraken API.
+  </Card>
+  <Card title="PartnerClient" icon="handshake" href="/rest/partner-client">
+    REST client for partner and affiliate operations via Kraken's embed API.
+  </Card>
+  <Card title="WebsocketClient" icon="bolt" href="/websockets/overview">
+    Unified WebSocket client for all Kraken markets — public and private streaming across Spot and Derivatives, with automatic reconnect and resubscribe.
+  </Card>
+  <Card title="WebsocketAPIClient" icon="tower-broadcast" href="/websockets/websocket-api-client">
+    REST-like trading over Kraken's WebSocket API for lower-latency Spot order management, with promise-wrapped request/response pairs.
+  </Card>
+</CardGroup>
+
+<Note>
+  Public endpoints — market data, tickers, order books, and candles — do not require API keys. You can start querying Kraken without credentials and add authentication only when you need private endpoints.
+</Note>
+
+## What you can build
+
+The `@siebly/kraken-api` SDK is relevant for any integration that touches Kraken's APIs or WebSockets. Common use cases include:
+
+- **Trading bots and execution services** — place, amend, and cancel Spot and Futures orders programmatically, with built-in client-side order ID generation for safe retries and reconciliation
+- **Real-time market dashboards** — stream live tickers, order books, trades, and OHLC candles over WebSocket without managing connection state yourself
+- **Portfolio and balance monitors** — subscribe to private balance and execution streams to keep account state in sync with zero polling overhead
+- **Alerting and signal pipelines** — consume event-driven market data and account updates to trigger downstream notifications or strategy signals
+- **Reconciliation and account state services** — query closed orders, trade history, and ledger entries over the REST API to reconstruct a reliable audit trail
+
+## Key features
+
+**TypeScript-first with typed requests and responses.** Most SDK methods ship with full TypeScript type declarations for both request parameters and response shapes. Your IDE will surface available options and catch mismatches at compile time.
+
+**Dual ESM and CJS output.** The package publishes both an ESM bundle (`dist/mjs`) and a CommonJS bundle (`dist/cjs`). Node.js will automatically select the correct format based on your project's module system — no configuration needed.
+
+**Automatic WebSocket reconnect and resubscribe.** The `WebsocketClient` monitors active connections with configurable heartbeats. When a disconnect is detected, the SDK tears down the stale socket, opens a fresh connection, re-authenticates if required, and resubscribes to every topic that was active — then emits a `reconnected` event so your application code can resync state.
+
+**Browser-friendly HMAC signing.** The request signing implementation is compatible with browser environments, so the SDK can be bundled for frontend use via webpack without replacing the crypto layer.
+
+**Proxy support via axios.** All REST clients are built on axios and accept standard axios request config, making it straightforward to route requests through an HTTP proxy.
+
+**Testnet for Derivatives.** Pass `testnet: true` when constructing a `DerivativesClient` to route all REST calls to Kraken's demo Futures environment (`https://demo-futures.kraken.com`) — safe for integration testing without risking real funds.
+
+**Built-in order ID generation.** Every REST client exposes a `generateNewOrderID()` method for producing unique client-side order IDs (`cl_ord_id` for Spot, `cliOrdId` for Futures) that survive retries and simplify reconciliation.
+
+## Related projects
+
+`@siebly/kraken-api` is part of the broader [Siebly.io](https://siebly.io/?ref=gh) SDK ecosystem, which publishes maintained JavaScript and TypeScript SDKs for major cryptocurrency exchanges including Bybit (`bybit-api`), OKX (`okx-api`), Binance (`binance`), Gate (`gateio-api`), Bitget (`bitget-api`), Kucoin (`kucoin-api`), Coinbase (`coinbase-api`), and Bitmart (`bitmart-api`). All SDKs follow consistent design patterns, so knowledge transfers across integrations.
+
+<Tip>
+  The SDK ships a bundled `llms.txt` file in the root of the npm package. If you are developing with an LLM or AI coding assistant, point it at `llms.txt` — it contains an AI-optimised, structured reference of every function and its parameters, which significantly improves the accuracy of AI-generated code using this SDK.
+</Tip>

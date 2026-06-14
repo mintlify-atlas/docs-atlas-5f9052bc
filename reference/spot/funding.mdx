@@ -1,0 +1,1317 @@
+---
+title: "Spot Funding and Earn Methods — SpotClient REST Reference"
+sidebarTitle: "Funding & Earn"
+description: "Reference for SpotClient deposit, withdrawal, and Kraken Earn methods — deposit addresses, withdrawal info, staking allocation and deallocation."
+---
+
+The `SpotClient` provides comprehensive funding methods covering the full lifecycle of moving assets in and out of Kraken, along with the complete Kraken Earn API for allocating funds to yield strategies. All methods in this section are **private endpoints** requiring a valid API key and secret. OAuth-based Fast API key management is also documented here.
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+```
+
+<Note>
+  **API key permissions:** Funding methods require the **Funds** permission group — enable **Query**, **Deposit**, and/or **Withdraw** as appropriate for your use case. Grant only the minimum permissions required.
+</Note>
+
+---
+
+## Deposits
+
+### `getDepositMethods(params)`
+
+Retrieve methods available for depositing a particular asset.
+
+**Signature**
+
+```typescript
+getDepositMethods(
+  params: SpotGetDepositMethodsParams
+): Promise<SpotAPISuccessResponse<SpotDepositMethod[]>>
+```
+
+<ParamField body="asset" type="string" required>
+  Asset to get deposit methods for (e.g. `"XBT"`, `"ETH"`).
+</ParamField>
+
+<ParamField body="aclass" type="'currency' | 'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/DepositMethods` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotDepositMethod[]`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `method` | `string` | Name of deposit method (e.g. `"Bitcoin"`) |
+| `limit` | `string \| boolean` | Maximum deposit amount, or `false` if no limit |
+| `fee` | `string` | Deposit fee |
+| `address-setup-fee` | `string` | Whether there is an address setup fee |
+| `gen-address` | `boolean` | Whether new addresses can be generated |
+| `minimum` | `string` | Minimum deposit amount |
+
+<CodeGroup>
+```typescript Get BTC Deposit Methods
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const methods = await client.getDepositMethods({ asset: 'XBT' });
+methods.result.forEach((m) => {
+  console.log(`Method: ${m.method}, Fee: ${m.fee}, Min: ${m.minimum}`);
+  console.log(`  Can generate address: ${m['gen-address']}`);
+});
+```
+</CodeGroup>
+
+---
+
+### `getDepositAddresses(params)`
+
+Retrieve existing deposit addresses or generate a new one for a particular asset and method.
+
+**Signature**
+
+```typescript
+getDepositAddresses(
+  params: SpotGetDepositAddressesParams
+): Promise<SpotAPISuccessResponse<SpotDepositAddress[]>>
+```
+
+<ParamField body="asset" type="string" required>
+  Asset to get deposit addresses for (e.g. `"XBT"`).
+</ParamField>
+
+<ParamField body="method" type="string" required>
+  Deposit method name (from `getDepositMethods()`). E.g. `"Bitcoin"`.
+</ParamField>
+
+<ParamField body="new" type="boolean">
+  If `true`, generates a new deposit address. Defaults to `false`.
+</ParamField>
+
+<ParamField body="amount" type="string | number">
+  Amount you want to deposit (for methods that require pre-registration).
+</ParamField>
+
+<ParamField body="aclass" type="'currency' | 'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/DepositAddresses` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotDepositAddress[]`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `address` | `string` | Deposit address |
+| `expiretm` | `string` | Expiration time (`"0"` if non-expiring) |
+| `new` | `boolean` | `true` if the address has never been used |
+| `tag` | `string?` | Memo/tag for XRP, XLM, EOS, STX |
+
+<CodeGroup>
+```typescript Get Existing Address
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const addresses = await client.getDepositAddresses({
+  asset: 'XBT',
+  method: 'Bitcoin',
+  new: false,
+});
+addresses.result.forEach((a) => {
+  console.log('Address:', a.address, '| New:', a.new);
+});
+```
+
+```typescript Generate New Address
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const fresh = await client.getDepositAddresses({
+  asset: 'XBT',
+  method: 'Bitcoin',
+  new: true,
+});
+console.log('New deposit address:', fresh.result[0]?.address);
+```
+</CodeGroup>
+
+---
+
+### `getDepositsStatus(params?)`
+
+Retrieve information about recent deposits. Results are sorted by recency.
+
+**Signature**
+
+```typescript
+getDepositsStatus(
+  params?: SpotGetDepositStatusParams
+): Promise<SpotAPISuccessResponse<SpotDepositStatusResponse>>
+```
+
+<ParamField body="asset" type="string">
+  Filter by asset (e.g. `"XBT"`).
+</ParamField>
+
+<ParamField body="method" type="string">
+  Filter by deposit method.
+</ParamField>
+
+<ParamField body="aclass" type="'currency' | 'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+<ParamField body="start" type="string">
+  Unix timestamp to begin results from.
+</ParamField>
+
+<ParamField body="end" type="string">
+  Unix timestamp to end results at.
+</ParamField>
+
+<ParamField body="cursor" type="boolean | string">
+  Set to `true` to enable cursor-based pagination. Pass the cursor string from a previous response to get the next page.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Number of results per page when using cursor pagination.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/DepositStatus` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Deposit Status
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const status = await client.getDepositsStatus({
+  asset: 'XBT',
+  method: 'Bitcoin',
+});
+console.log(status.result);
+```
+
+```typescript Paginated Deposits
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// First page
+const page1 = await client.getDepositsStatus({
+  asset: 'XBT',
+  cursor: true,
+  limit: 10,
+});
+const cursor = page1.result.cursor;
+
+// Next page (if cursor is present)
+if (cursor) {
+  const page2 = await client.getDepositsStatus({
+    asset: 'XBT',
+    cursor,
+    limit: 10,
+  });
+  console.log(page2.result);
+}
+```
+</CodeGroup>
+
+---
+
+## Withdrawals
+
+### `getWithdrawalMethods(params?)`
+
+Retrieve the list of withdrawal methods available to the user.
+
+**Signature**
+
+```typescript
+getWithdrawalMethods(
+  params?: SpotGetWithdrawalMethodsParams
+): Promise<SpotAPISuccessResponse<SpotWithdrawalMethod[]>>
+```
+
+<ParamField body="asset" type="string">
+  Filter by asset (e.g. `"XBT"`).
+</ParamField>
+
+<ParamField body="network" type="string">
+  Filter by blockchain/network name.
+</ParamField>
+
+<ParamField body="aclass" type="'currency' | 'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/WithdrawMethods` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotWithdrawalMethod[]`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `asset` | `string` | Asset name |
+| `method` | `string` | Withdrawal method name |
+| `network` | `string` | Blockchain/network name |
+| `minimum` | `string` | Minimum withdrawal amount |
+
+<CodeGroup>
+```typescript Available Withdrawal Methods
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const methods = await client.getWithdrawalMethods({ asset: 'XBT' });
+methods.result.forEach((m) => {
+  console.log(`${m.method} via ${m.network} — min: ${m.minimum}`);
+});
+```
+</CodeGroup>
+
+---
+
+### `getWithdrawalAddresses(params?)`
+
+Retrieve the list of withdrawal addresses saved in your account.
+
+**Signature**
+
+```typescript
+getWithdrawalAddresses(
+  params?: SpotGetWithdrawalAddressesParams
+): Promise<SpotAPISuccessResponse<SpotWithdrawalAddress[]>>
+```
+
+<ParamField body="asset" type="string">
+  Filter by asset.
+</ParamField>
+
+<ParamField body="method" type="string">
+  Filter by withdrawal method.
+</ParamField>
+
+<ParamField body="key" type="string">
+  Filter by withdrawal key name (the label you assigned to the address in your Kraken account).
+</ParamField>
+
+<ParamField body="verified" type="boolean">
+  Filter by address verification status.
+</ParamField>
+
+<ParamField body="aclass" type="'currency' | 'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/WithdrawAddresses` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotWithdrawalAddress[]`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `address` | `string` | Withdrawal address |
+| `asset` | `string` | Asset name |
+| `method` | `string` | Withdrawal method |
+| `key` | `string` | Address label/key name |
+| `tag` | `string?` | Memo/tag for XRP, XLM, EOS, STX |
+| `verified` | `boolean` | Whether the address is verified |
+
+<CodeGroup>
+```typescript Get Verified Addresses
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const addresses = await client.getWithdrawalAddresses({
+  asset: 'XBT',
+  verified: true,
+});
+addresses.result.forEach((a) => {
+  console.log(`Key: ${a.key} → ${a.address}`);
+});
+```
+
+```typescript Find Address by Key
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const result = await client.getWithdrawalAddresses({ key: 'btc_2709' });
+console.log(result.result[0]);
+```
+</CodeGroup>
+
+---
+
+### `getWithdrawalInfo(params)`
+
+Retrieve fee and limit information about a potential withdrawal before submitting it.
+
+**Signature**
+
+```typescript
+getWithdrawalInfo(
+  params: SpotGetWithdrawalInfoParams
+): Promise<SpotAPISuccessResponse<SpotWithdrawalInfo>>
+```
+
+<ParamField body="asset" type="string" required>
+  Asset to withdraw (e.g. `"XBT"`).
+</ParamField>
+
+<ParamField body="key" type="string" required>
+  Withdrawal key name (label of the saved address).
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to withdraw.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/WithdrawInfo` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotWithdrawalInfo`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `method` | `string` | Withdrawal method that will be used |
+| `limit` | `string` | Maximum amount that can be withdrawn |
+| `amount` | `string` | Net amount to be received after fees |
+| `fee` | `string` | Withdrawal fee |
+
+<CodeGroup>
+```typescript Check Withdrawal Fees First
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const info = await client.getWithdrawalInfo({
+  asset: 'XBT',
+  key: 'btc_2709',
+  amount: '0.5',
+});
+console.log('Method:', info.result.method);
+console.log('Fee:', info.result.fee);
+console.log('You will receive:', info.result.amount);
+console.log('Withdrawal limit:', info.result.limit);
+```
+</CodeGroup>
+
+<Tip>
+  Always call `getWithdrawalInfo()` before `submitWithdrawal()` to confirm the fee and verify the amount you will receive. This prevents surprises from network fees.
+</Tip>
+
+---
+
+### `submitWithdrawal(params)`
+
+Submit a withdrawal request.
+
+**Signature**
+
+```typescript
+submitWithdrawal(
+  params: SpotWithdrawFundsParams
+): Promise<SpotAPISuccessResponse<{ refid: string }>>
+```
+
+<ParamField body="asset" type="string" required>
+  Asset to withdraw (e.g. `"XBT"`).
+</ParamField>
+
+<ParamField body="key" type="string" required>
+  Withdrawal key name (label of the saved destination address).
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to withdraw (gross amount including fees).
+</ParamField>
+
+<ParamField body="address" type="string">
+  Optional confirmation of the destination address (must match the address saved under `key`).
+</ParamField>
+
+<ParamField body="max_fee" type="string">
+  If the withdrawal fee exceeds this value, the withdrawal will fail. Useful for capping costs.
+</ParamField>
+
+<ParamField body="aclass" type="'currency' | 'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Withdraw` |
+| **Auth required** | Yes |
+
+Returns `{ refid: string }` — the withdrawal reference ID used to track or cancel the withdrawal.
+
+<CodeGroup>
+```typescript Submit a Withdrawal
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const withdrawal = await client.submitWithdrawal({
+  asset: 'XBT',
+  key: 'btc_2709',
+  amount: '0.5',
+  address: 'bc1qexampleaddress',
+  max_fee: '0.0002', // fail if fee > 0.0002 BTC
+});
+console.log('Withdrawal reference ID:', withdrawal.result.refid);
+```
+</CodeGroup>
+
+---
+
+### `getWithdrawalsStatus(params?)`
+
+Retrieve information about recent withdrawals. Results are sorted by recency.
+
+**Signature**
+
+```typescript
+getWithdrawalsStatus(
+  params?: SpotGetWithdrawalsStatusParams
+): Promise<SpotAPISuccessResponse<SpotWithdrawalStatus[]>>
+```
+
+<ParamField body="asset" type="string">
+  Filter by asset.
+</ParamField>
+
+<ParamField body="method" type="string">
+  Filter by withdrawal method.
+</ParamField>
+
+<ParamField body="aclass" type="'currency' | 'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+<ParamField body="start" type="string">
+  Unix timestamp to begin results from.
+</ParamField>
+
+<ParamField body="end" type="string">
+  Unix timestamp to end results at.
+</ParamField>
+
+<ParamField body="cursor" type="boolean | string">
+  Enable cursor-based pagination or pass a cursor string for the next page.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Number of results per page when using cursor pagination.
+</ParamField>
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral values are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/WithdrawStatus` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotWithdrawalStatus[]`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `refid` | `string` | Withdrawal reference ID |
+| `txid` | `string` | On-chain transaction ID |
+| `asset` | `string` | Asset name |
+| `amount` | `string` | Amount withdrawn |
+| `fee` | `string` | Fee paid |
+| `status` | `'Initial' \| 'Pending' \| 'Settled' \| 'Success' \| 'Failure'` | Withdrawal status |
+| `status-prop` | `string?` | `cancel-pending`, `canceled`, `cancel-denied`, `return`, `onhold` |
+| `key` | `string` | Withdrawal key name |
+
+<CodeGroup>
+```typescript Check Withdrawal Status
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const withdrawals = await client.getWithdrawalsStatus({ asset: 'XBT' });
+withdrawals.result.forEach((w) => {
+  console.log(`${w.refid}: ${w.status} — ${w.amount} ${w.asset}`);
+});
+```
+
+```typescript Paginated Withdrawals
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const page1 = await client.getWithdrawalsStatus({
+  asset: 'XBT',
+  cursor: true,
+  limit: 10,
+});
+console.log('Page 1:', page1.result);
+```
+</CodeGroup>
+
+---
+
+### `cancelWithdrawal(params)`
+
+Cancel a recently requested withdrawal, if it has not already been successfully processed.
+
+**Signature**
+
+```typescript
+cancelWithdrawal(params: {
+  asset: string;
+  refid: string;
+}): Promise<SpotAPISuccessResponse<boolean>>
+```
+
+<ParamField body="asset" type="string" required>
+  Asset of the withdrawal to cancel.
+</ParamField>
+
+<ParamField body="refid" type="string" required>
+  Reference ID of the withdrawal (returned by `submitWithdrawal()`).
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/WithdrawCancel` |
+| **Auth required** | Yes |
+
+Returns `true` if the cancellation was successful.
+
+<CodeGroup>
+```typescript Cancel a Withdrawal
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const cancelled = await client.cancelWithdrawal({
+  asset: 'XBT',
+  refid: 'AGBSO6T-UFMTTQ-I7KGS6',
+});
+console.log('Cancellation successful:', cancelled.result);
+```
+</CodeGroup>
+
+<Note>
+  Withdrawal cancellation is only possible while the withdrawal is in `Initial` or `Pending` status. Cancellations of already-settled or broadcast transactions will fail.
+</Note>
+
+---
+
+## Kraken Earn
+
+### `getEarnStrategies(params?)`
+
+List available Earn strategies along with their parameters. Only strategies available to the user based on geographic region are returned.
+
+**Signature**
+
+```typescript
+getEarnStrategies(params?: SpotListEarnStrategiesParams): Promise<
+  SpotAPISuccessResponse<{ items: SpotEarnStrategy[]; next_cursor?: string }>
+>
+```
+
+<ParamField body="asset" type="string">
+  Filter strategies by asset.
+</ParamField>
+
+<ParamField body="lock_type" type="('flex' | 'bonded' | 'timed' | 'instant')[]">
+  Filter by lock type(s).
+</ParamField>
+
+<ParamField body="ascending" type="boolean">
+  Sort order — `true` for ascending, `false` for descending (default).
+</ParamField>
+
+<ParamField body="cursor" type="string">
+  Pagination cursor from a previous response's `next_cursor`.
+</ParamField>
+
+<ParamField body="limit" type="number">
+  Number of results per page.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Earn/Strategies` |
+| **Auth required** | Yes |
+
+**Key response fields** — `SpotEarnStrategy`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `string` | Strategy ID (used for allocate/deallocate) |
+| `asset` | `string` | Asset this strategy operates on |
+| `lock_type` | `SpotEarnLockType` | Lock parameters (type, bonding period, etc.) |
+| `apr_estimate` | `SpotEarnAPREstimate?` | APR estimate range `{ low, high }` |
+| `allocation_fee` | `string \| number` | Fee for allocating |
+| `deallocation_fee` | `string \| number` | Fee for deallocating |
+| `can_allocate` | `boolean` | Whether you can currently allocate |
+| `can_deallocate` | `boolean` | Whether you can currently deallocate |
+
+<CodeGroup>
+```typescript List Earn Strategies
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const strategies = await client.getEarnStrategies({ asset: 'ETH' });
+strategies.result.items.forEach((s) => {
+  console.log(`${s.id}: ${s.asset} ${s.lock_type.type}`);
+  if (s.apr_estimate) {
+    console.log(`  APR: ${s.apr_estimate.low}% – ${s.apr_estimate.high}%`);
+  }
+  console.log(`  Can allocate: ${s.can_allocate}`);
+});
+```
+</CodeGroup>
+
+---
+
+### `getEarnAllocations(params?)`
+
+List all Earn allocations for the user. By default, all allocations are returned including those with zero balance from previously used strategies.
+
+**Signature**
+
+```typescript
+getEarnAllocations(
+  params?: SpotListEarnAllocationsParams
+): Promise<SpotAPISuccessResponse<SpotListEarnAllocationsResponse>>
+```
+
+<ParamField body="converted_asset" type="string">
+  Asset to convert total values into for reporting (e.g. `"USD"`).
+</ParamField>
+
+<ParamField body="hide_zero_allocations" type="boolean">
+  If `true`, hides strategies with zero current balance.
+</ParamField>
+
+<ParamField body="ascending" type="boolean">
+  Sort order.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Earn/Allocations` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotListEarnAllocationsResponse`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `converted_asset` | `string` | Currency used for conversion |
+| `total_allocated` | `string` | Total amount allocated across all strategies |
+| `total_rewarded` | `string` | Total rewards earned |
+| `items` | `SpotEarnAllocation[]` | Per-strategy allocation details |
+
+<CodeGroup>
+```typescript View Current Earn Allocations
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const allocations = await client.getEarnAllocations({
+  converted_asset: 'USD',
+  hide_zero_allocations: true,
+});
+console.log('Total allocated (USD):', allocations.result.total_allocated);
+console.log('Total rewarded (USD):', allocations.result.total_rewarded);
+allocations.result.items.forEach((item) => {
+  console.log(`Strategy ${item.strategy_id}: ${item.amount_allocated.total.native} ${item.native_asset}`);
+});
+```
+</CodeGroup>
+
+---
+
+### `allocateEarnFunds(params)`
+
+Allocate funds to an Earn strategy. This method is **asynchronous** — use `getEarnAllocationStatus()` to poll for completion.
+
+**Signature**
+
+```typescript
+allocateEarnFunds(params: {
+  amount: string;
+  strategy_id: string;
+}): Promise<SpotAPISuccessResponse<boolean>>
+```
+
+<ParamField body="strategy_id" type="string" required>
+  Strategy ID to allocate to (from `getEarnStrategies()`).
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to allocate (in the strategy's native asset).
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Earn/Allocate` |
+| **Auth required** | Yes |
+
+Returns `true` if the allocation request was successfully submitted.
+
+---
+
+### `deallocateEarnFunds(params)`
+
+Deallocate funds from an Earn strategy. This method is **asynchronous** — use `getEarnDeallocationStatus()` to poll for completion.
+
+**Signature**
+
+```typescript
+deallocateEarnFunds(params: {
+  amount: string;
+  strategy_id: string;
+}): Promise<SpotAPISuccessResponse<boolean>>
+```
+
+<ParamField body="strategy_id" type="string" required>
+  Strategy ID to deallocate from.
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to deallocate.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Earn/Deallocate` |
+| **Auth required** | Yes |
+
+---
+
+### `getEarnAllocationStatus(params)`
+
+Get the status of the last `allocateEarnFunds()` request for a specific strategy.
+
+**Signature**
+
+```typescript
+getEarnAllocationStatus(params: {
+  strategy_id: string;
+}): Promise<SpotAPISuccessResponse<{ pending: boolean }>>
+```
+
+<ParamField body="strategy_id" type="string" required>
+  Strategy ID to check allocation status for.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Earn/AllocateStatus` |
+| **Auth required** | Yes |
+
+Returns `{ pending: boolean }` — `true` if the allocation is still processing.
+
+---
+
+### `getEarnDeallocationStatus(params)`
+
+Get the status of the last `deallocateEarnFunds()` request for a specific strategy.
+
+**Signature**
+
+```typescript
+getEarnDeallocationStatus(params: {
+  strategy_id: string;
+}): Promise<SpotAPISuccessResponse<{ pending: boolean }>>
+```
+
+<ParamField body="strategy_id" type="string" required>
+  Strategy ID to check deallocation status for.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/Earn/DeallocateStatus` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Allocate and Poll for Completion
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const strategyId = 'ESXUM7H-SJHQ4-ZRMRN2'; // from getEarnStrategies()
+
+// 1. Allocate
+const allocated = await client.allocateEarnFunds({
+  strategy_id: strategyId,
+  amount: '0.5',
+});
+console.log('Allocation submitted:', allocated.result);
+
+// 2. Poll until complete
+let pending = true;
+while (pending) {
+  await new Promise((r) => setTimeout(r, 2000));
+  const status = await client.getEarnAllocationStatus({
+    strategy_id: strategyId,
+  });
+  pending = status.result.pending;
+  console.log('Pending:', pending);
+}
+console.log('Allocation complete!');
+```
+
+```typescript Deallocate and Poll
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const strategyId = 'ESXUM7H-SJHQ4-ZRMRN2';
+
+// 1. Deallocate
+await client.deallocateEarnFunds({ strategy_id: strategyId, amount: '0.25' });
+
+// 2. Poll until complete
+let pending = true;
+while (pending) {
+  await new Promise((r) => setTimeout(r, 2000));
+  const status = await client.getEarnDeallocationStatus({
+    strategy_id: strategyId,
+  });
+  pending = status.result.pending;
+}
+console.log('Deallocation complete!');
+```
+</CodeGroup>
+
+---
+
+## OAuth / Fast API Keys
+
+These methods enable programmatic management of OAuth-based authentication and Fast API keys. Fast API keys can be scoped with fine-grained permissions and IP allowlists.
+
+### `getOAuthAccessToken(params)`
+
+Retrieve an OAuth2 access token using an authorization code or refresh token flow.
+
+**Signature**
+
+```typescript
+getOAuthAccessToken(
+  params: OauthGetAccessTokenParams
+): Promise<OauthGetAccessTokenResponse>
+```
+
+<ParamField body="grant_type" type="'authorization_code' | 'refresh_token'" required>
+  OAuth2 grant type.
+</ParamField>
+
+<ParamField body="code" type="string">
+  Authorization code. Required when `grant_type` is `authorization_code`.
+</ParamField>
+
+<ParamField body="redirect_uri" type="string">
+  Redirect URI used in the authorization request. Required when `grant_type` is `authorization_code`.
+</ParamField>
+
+<ParamField body="refresh_token" type="string">
+  Refresh token. Required when `grant_type` is `refresh_token`.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `oauth/token` |
+| **Auth required** | Basic auth (base64-encoded client credentials) |
+
+**Response** — `OauthGetAccessTokenResponse`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `access_token` | `string` | OAuth2 Bearer token |
+| `token_type` | `'bearer'` | Token type |
+| `expires_in` | `number` | Token lifetime in seconds |
+| `refresh_token` | `string` | Token for obtaining new access tokens |
+
+---
+
+### `getOAuthUserInfo()`
+
+Returns the email address and IBAN of the authenticated user. Requires OAuth2 Bearer token with scope `account.info:basic`.
+
+**Signature**
+
+```typescript
+getOAuthUserInfo(): Promise<OauthGetUserInfoResponse>
+```
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `oauth/userinfo` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+---
+
+### `createOAuthFastApiKey(params)`
+
+Creates a Fast API key with specified permissions and IP allowlist. Requires OAuth2 Bearer token with scope `account.fast-api-key:write`.
+
+**Signature**
+
+```typescript
+createOAuthFastApiKey(
+  params: OauthCreateFastApiKeyParams
+): Promise<OauthCreateFastApiKeyResponse>
+```
+
+<ParamField body="api_key_name" type="string" required>
+  Name for the new key (max 32 characters).
+</ParamField>
+
+<ParamField body="ip_allowlist" type="string[]" required>
+  Array of IP addresses or CIDR ranges allowed to use this key.
+</ParamField>
+
+<ParamField body="permissions" type="object" required>
+  Object of boolean permission flags:
+  `export_data`, `funds_add`, `funds_earn`, `funds_query`, `funds_withdraw`, `ledger_query`, `trades_close`, `trades_modify`, `trades_query_closed`, `trades_query_open`.
+</ParamField>
+
+<ParamField body="nonce_window" type="number">
+  Nonce tolerance window in milliseconds.
+</ParamField>
+
+<ParamField body="query_from" type="number">
+  Unix timestamp — key can only query data from this time.
+</ParamField>
+
+<ParamField body="query_to" type="number">
+  Unix timestamp — key can only query data up to this time.
+</ParamField>
+
+<ParamField body="valid_until" type="number">
+  Unix timestamp after which the key expires.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `oauth/fast-api-key` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+<Note>
+  The `api_key` and `secret` fields are **only returned on creation**. Store them securely — they cannot be retrieved again.
+</Note>
+
+<CodeGroup>
+```typescript Create a Read-Only Fast API Key
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({ /* OAuth credentials */ });
+
+const key = await client.createOAuthFastApiKey({
+  api_key_name: 'my-read-only-key',
+  ip_allowlist: ['203.0.113.0/24'],
+  permissions: {
+    funds_query: true,
+    ledger_query: true,
+    trades_query_open: true,
+    trades_query_closed: true,
+  },
+});
+
+// Store these securely — not retrievable again
+console.log('API Key:', key.result.api_key);
+console.log('Secret:', key.result.secret);
+```
+</CodeGroup>
+
+---
+
+### `updateOAuthFastApiKey(params)`
+
+Updates an existing Fast API key. Requires OAuth2 Bearer token with scope `account.fast-api-key:write`.
+
+**Signature**
+
+```typescript
+updateOAuthFastApiKey(params: OauthUpdateFastApiKeyParams): Promise<{ result: boolean }>
+```
+
+<ParamField body="api_key_name" type="string" required>
+  Current name of the key to update (max 32 characters).
+</ParamField>
+
+<ParamField body="new_api_key_name" type="string">
+  New name for the key (max 32 characters).
+</ParamField>
+
+<ParamField body="ip_allowlist" type="string[]" required>
+  Updated IP allowlist.
+</ParamField>
+
+<ParamField body="permissions" type="object" required>
+  Updated permission flags (same shape as `createOAuthFastApiKey`).
+</ParamField>
+
+<ParamField body="nonce_window" type="number">
+  Updated nonce window.
+</ParamField>
+
+<ParamField body="query_from" type="number">
+  Updated query start timestamp.
+</ParamField>
+
+<ParamField body="query_to" type="number">
+  Updated query end timestamp.
+</ParamField>
+
+<ParamField body="valid_until" type="number">
+  Updated expiry timestamp.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `PUT` |
+| **Endpoint** | `oauth/fast-api-key` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+---
+
+### `deleteOAuthFastApiKey(params)`
+
+Deletes a Fast API key. Requires OAuth2 Bearer token with scope `account.fast-api-key:write`.
+
+**Signature**
+
+```typescript
+deleteOAuthFastApiKey(params: {
+  api_key_name: string;
+}): Promise<{ result: boolean }>
+```
+
+<ParamField body="api_key_name" type="string" required>
+  Name of the key to delete (max 32 characters).
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `DELETE` |
+| **Endpoint** | `oauth/fast-api-key` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+---
+
+### `listOAuthFastApiKeys()`
+
+List all Fast API keys associated with the OAuth client. Requires OAuth2 Bearer token with scope `account.fast-api-key:read`.
+
+**Signature**
+
+```typescript
+listOAuthFastApiKeys(): Promise<{ result: OauthFastApiKey[] }>
+```
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `oauth/fast-api-keys` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+**Response** — `OauthFastApiKey[]`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `api_key_name` | `string` | Key name |
+| `id` | `string` | Unique key identifier |
+| `created_time` | `string` | Creation timestamp |
+| `modified_time` | `string` | Last modification timestamp |
+| `ip_allowlist` | `string[]` | Allowed IP addresses |
+| `permissions` | `object` | Permission flags |
+| `valid_until` | `number` | Expiry Unix timestamp |
+| `last_used` | `number` | Last usage Unix timestamp |
+
+---
+
+## Full Deposit + Withdrawal Flow
+
+<CodeGroup>
+```typescript Deposit Flow
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// 1. Find available deposit methods for BTC
+const methods = await client.getDepositMethods({ asset: 'XBT' });
+const method = methods.result[0].method; // e.g. 'Bitcoin'
+
+// 2. Get a deposit address
+const addresses = await client.getDepositAddresses({
+  asset: 'XBT',
+  method,
+  new: false, // reuse existing address
+});
+const depositAddress = addresses.result[0].address;
+console.log('Send BTC to:', depositAddress);
+
+// 3. Monitor deposit status
+const status = await client.getDepositsStatus({ asset: 'XBT', method });
+console.log('Recent deposits:', status.result);
+```
+
+```typescript Withdrawal Flow
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// 1. Find verified withdrawal addresses
+const addresses = await client.getWithdrawalAddresses({
+  asset: 'XBT',
+  verified: true,
+});
+const key = addresses.result[0].key; // e.g. 'btc_2709'
+
+// 2. Preview fees
+const info = await client.getWithdrawalInfo({
+  asset: 'XBT',
+  key,
+  amount: '0.1',
+});
+console.log(`Fee: ${info.result.fee}, You receive: ${info.result.amount}`);
+
+// 3. Submit withdrawal
+const withdrawal = await client.submitWithdrawal({
+  asset: 'XBT',
+  key,
+  amount: '0.1',
+  max_fee: '0.0005',
+});
+console.log('Reference ID:', withdrawal.result.refid);
+
+// 4. Track status
+const statusList = await client.getWithdrawalsStatus({ asset: 'XBT' });
+const myWithdrawal = statusList.result.find(
+  (w) => w.refid === withdrawal.result.refid
+);
+console.log('Status:', myWithdrawal?.status);
+```
+</CodeGroup>

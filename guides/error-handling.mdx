@@ -1,0 +1,213 @@
+---
+title: "Error Handling Patterns for the Kraken API SDK"
+sidebarTitle: "Error Handling"
+description: "Handle REST API errors, WebSocket exceptions, and network failures gracefully in the @siebly/kraken-api SDK using promise catch blocks and event listeners."
+---
+
+Robust error handling is a prerequisite for any reliable trading integration. The `@siebly/kraken-api` SDK surfaces errors through two distinct channels depending on how you interact with the API: REST clients throw (or reject) on failure, and the `WebsocketClient` emits named events for connection-level issues. Understanding both patterns — and combining them correctly — means your system responds precisely to what went wrong, instead of silently failing at the worst possible moment.
+
+## REST API errors
+
+All REST client methods (`SpotClient`, `DerivativesClient`, etc.) return promises. When a request fails — whether due to a network problem, an invalid parameter, or an exchange-side rejection — the SDK throws a structured error object. You can intercept it with a `try/catch` block or a `.catch()` handler.
+
+The SDK's `parseException` method in `BaseRestClient` normalises HTTP error responses into a consistent shape before throwing:
+
+```typescript
+{
+  code: number;          // HTTP status code (e.g. 400, 403, 429)
+  message: string;       // HTTP status text
+  body: any;             // Raw response body from Kraken
+  headers: object;       // Response headers
+  requestOptions: object; // Sanitised request config (credentials omitted)
+  requestParams: object;  // The parameters sent with the failing request
+}
+```
+
+API credentials are automatically scrubbed from the error before it is thrown, so you can safely log the full error object without leaking secrets.
+
+### Wrapping orders in try/catch
+
+The cleanest pattern for order submission is a `try/catch` around the awaited call, with structured logging of the error body so you have the exchange's reason alongside your own context:
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+async function placeOrder() {
+  const orderId = client.generateNewOrderID();
+
+  try {
+    const result = await client.submitOrder({
+      ordertype: 'limit',
+      type: 'buy',
+      pair: 'XBTUSD',
+      volume: '0.0001',
+      price: '10000',
+      cl_ord_id: orderId,
+    });
+
+    console.log('Order placed:', result);
+  } catch (err: any) {
+    // err.code   → HTTP status
+    // err.body   → Kraken's error payload, e.g. { error: ['EOrder:Insufficient funds'] }
+    // err.message → HTTP status text
+    console.error('Order failed:', {
+      clientOrderId: orderId,
+      httpStatus: err.code,
+      krakenError: err.body,
+    });
+  }
+}
+
+placeOrder();
+```
+
+You can also use `.catch()` inline for fire-and-forget flows:
+
+```typescript
+client
+  .submitOrder({
+    ordertype: 'market',
+    type: 'buy',
+    volume: '0.01',
+    pair: 'XBTUSD',
+    cl_ord_id: client.generateNewOrderID(),
+  })
+  .then((result) => console.log('Order result:', result))
+  .catch((err) => console.error('Order error:', err?.body ?? err));
+```
+
+### Enabling HTTP trace logging
+
+For low-level debugging, set the `KRAKENTRACE` environment variable before starting your process. The SDK will then log every outgoing request and incoming response via `axios` interceptors:
+
+```bash
+KRAKENTRACE=1 node dist/bot.js
+```
+
+This is useful during initial integration but should be removed in production as it logs full request bodies.
+
+## WebSocket errors
+
+The `WebsocketClient` is event-driven. Rather than throwing exceptions, it emits named events you register handlers for. The two most important events for error handling are `exception` and the reconnect pair `reconnecting` / `reconnected`.
+
+### Listening to the `exception` event
+
+The `exception` event fires when the SDK encounters an unexpected condition on a WebSocket connection — such as a protocol error, a failed authentication attempt, or an unhandled message format:
+
+```typescript
+import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+ws.on('exception', (data) => {
+  // Log and alert — do not silently swallow this
+  console.error('WebSocket exception:', data);
+});
+
+ws.on('message', (data) => {
+  console.log('Received:', JSON.stringify(data));
+});
+
+ws.subscribe(
+  { topic: 'executions', payload: { snap_orders: true } },
+  WS_KEY_MAP.spotPrivateV2,
+);
+```
+
+### Handling reconnects
+
+The SDK monitors connections with heartbeats. When a disconnect is detected, it automatically tears down the stale connection and opens a new one, re-authenticating and re-subscribing to all previously active topics. Your application is informed at each stage:
+
+| Event | When it fires | Recommended action |
+|---|---|---|
+| `reconnecting` | Disconnect detected, retry in progress | Pause order management |
+| `reconnected` | Connection restored and subscriptions synced | Backfill via REST, then resume |
+
+```typescript
+ws.on('reconnecting', (data) => {
+  console.warn('Connection lost, reconnecting…', data?.wsKey);
+  // Pause any risky commands — e.g. halt new order placement
+  pauseOrderManagement();
+});
+
+ws.on('reconnected', (data) => {
+  console.info('Reconnected:', data?.wsKey);
+  // Fetch current account state via REST to catch anything missed while offline
+  backfillAccountState().then(() => resumeOrderManagement());
+});
+```
+
+Do not treat a `reconnecting` event as an unrecoverable error. WebSocket connections can drop during periods of high market volatility or routine network interruptions. The SDK handles re-establishment; your responsibility is to resync application state once the connection is restored.
+
+## Network and timeout errors
+
+The SDK sends REST requests via `axios`. By default, requests time out after 5 minutes. You can reduce this — or add proxy support — via the `networkOptions` second argument accepted by every REST client constructor:
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient(
+  {
+    apiKey: process.env.API_SPOT_KEY!,
+    apiSecret: process.env.API_SPOT_SECRET!,
+  },
+  {
+    // Tighten the timeout for latency-sensitive flows
+    timeout: 10_000, // 10 seconds
+
+    // Route through a proxy if your environment requires one
+    proxy: {
+      host: '127.0.0.1',
+      port: 8080,
+    },
+  },
+);
+```
+
+If no response is received within the timeout window, axios throws a network error that your `.catch()` or `try/catch` will capture. The `err.request` property will be set but `err.response` will be `undefined`, indicating the request left the client but no reply arrived.
+
+## Common errors FAQ
+
+<Accordion title='"Invalid API key" or "EAPI:Invalid key"'>
+This means the API key supplied does not match what Kraken has on record, or it was created for the wrong product group.
+
+- Double-check that the key and secret are copied correctly — trailing whitespace is a common culprit.
+- Confirm you are using **Spot** credentials with `SpotClient` and **Futures** credentials with `DerivativesClient`. Keys are not interchangeable across products.
+- Verify the key is active and has not been revoked in your Kraken account settings.
+</Accordion>
+
+<Accordion title='"Permission denied" or "EAPI:Invalid permissions"'>
+Your API key is valid but lacks the permission required for the operation you attempted.
+
+- Trading endpoints require the **Orders and trades** permission.
+- Account data endpoints require the **Query funds** or **Query orders** permissions.
+- Withdrawal endpoints require the **Withdraw funds** permission — only enable this if your use case explicitly requires it.
+
+Review the key's permissions in the Kraken API management panel and enable only what your system needs.
+</Accordion>
+
+<Accordion title='"NONCE too small" or nonce errors on parallel requests'>
+Kraken's Spot REST API uses a monotonically increasing nonce per API key to prevent replay attacks. If two requests are dispatched simultaneously using the same credentials, one nonce may arrive at Kraken before the other but with a lower value.
+
+- Avoid firing multiple concurrent authenticated requests from different code paths sharing the same `SpotClient` instance if ordering is critical.
+- The SDK's internal nonce generator handles sequential requests correctly; the issue arises when you deliberately parallelise private calls.
+- For high-throughput scenarios, use batch endpoints (`submitBatchOrders`) instead of multiple concurrent single-order calls.
+</Accordion>
+
+<Accordion title='Connection closed unexpectedly'>
+An unexpected close fires the `close` event. The SDK will automatically attempt to reconnect and re-subscribe. You do not need to manually re-instantiate the client.
+
+Listen for `reconnecting` to know a retry is in progress, and `reconnected` to know recovery is complete. If reconnection is taking longer than expected, check Kraken's status page for ongoing incidents.
+</Accordion>
+
+<Warning>
+Never silently swallow errors in production. A bare `catch(() => {})` that discards the error means your system will keep running in an unknown state — placing orders it thinks succeeded, or missing fills it never heard about. At minimum, log every error with enough context (order ID, symbol, timestamp) to reconstruct what happened during post-trade analysis.
+</Warning>

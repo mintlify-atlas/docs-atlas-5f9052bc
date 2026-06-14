@@ -1,47 +1,155 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get started with @siebly/kraken-api in 5 minutes"
+sidebarTitle: "Quickstart"
+description: "Install the Kraken API SDK, make your first public REST API call, and stream live market data over WebSockets — all in under 5 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This page walks through everything you need to go from zero to a working Kraken integration: installing the package, querying public market data over the Spot REST API, subscribing to a live WebSocket ticker stream, and adding credentials to access private endpoints. Each step builds on the last, so you can stop at any point once your integration is running.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="Install the package">
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+    Add `@siebly/kraken-api` to your project using your preferred package manager.
 
-    ```bash
-    your-cli start
-    ```
+    <CodeGroup>
+
+      ```bash npm
+      npm install @siebly/kraken-api
+      ```
+
+      ```bash yarn
+      yarn add @siebly/kraken-api
+      ```
+
+      ```bash pnpm
+      pnpm install @siebly/kraken-api
+      ```
+
+    </CodeGroup>
+
+    The package ships both ESM and CommonJS builds. Node.js will automatically select the correct bundle based on your project's module system — no extra configuration is required.
+
   </Step>
+
+  <Step title="Make your first public REST call">
+
+    Public endpoints don't need API keys. Create a `SpotClient` with no arguments and call a few market data methods to verify your connection.
+
+    ```typescript
+    import { SpotClient } from '@siebly/kraken-api';
+
+    const client = new SpotClient();
+
+    async function main() {
+      // Check server time
+      const serverTime = await client.getServerTime();
+      console.log('Server time:', serverTime);
+
+      // Check system status
+      const systemStatus = await client.getSystemStatus();
+      console.log('System status:', systemStatus);
+
+      // Get ticker data for BTC/USD
+      const ticker = await client.getTicker({ pair: 'XBTUSD' });
+      console.log('BTC/USD ticker:', ticker);
+    }
+
+    main().catch(console.error);
+    ```
+
+    If you see a server time, a system status of `online`, and ticker data in your console, your integration is working correctly. See the [SpotClient reference](/rest/spot-client) for the full list of available methods.
+
+  </Step>
+
+  <Step title="Subscribe to WebSocket market data">
+
+    For real-time data, use the `WebsocketClient`. Public WebSocket streams don't require credentials. The `WS_KEY_MAP` export tells the SDK which Kraken WebSocket endpoint to connect to — use `WS_KEY_MAP.spotPublicV2` for Spot market data.
+
+    ```typescript
+    import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+    const ws = new WebsocketClient();
+
+    // Connection lifecycle events
+    ws.on('open', (data) => {
+      console.log('Connected:', data?.wsKey);
+    });
+
+    ws.on('reconnected', (data) => {
+      console.log('Reconnected:', data?.wsKey);
+    });
+
+    ws.on('exception', (data) => {
+      console.error('WebSocket error:', data);
+    });
+
+    // Streaming data arrives on the 'message' event
+    ws.on('message', (data) => {
+      console.log('Market data:', JSON.stringify(data, null, 2));
+    });
+
+    // Subscribe to the BTC/USD ticker
+    ws.subscribe(
+      {
+        topic: 'ticker',
+        payload: {
+          symbol: ['BTC/USD'],
+        },
+      },
+      WS_KEY_MAP.spotPublicV2,
+    );
+    ```
+
+    The SDK automatically manages the WebSocket connection. If the connection drops, it will reconnect and resubscribe to all active topics without any action required from your code. See the [WebSocket overview](/websockets/overview) for more on event handling and available topics.
+
+  </Step>
+
+  <Step title="Add credentials for private endpoints">
+
+    Private endpoints — account balances, order placement, trade history — require API keys. Pass your `apiKey` and `apiSecret` when constructing the client.
+
+    <Note>
+      Spot and Futures use **completely separate API keys**. Keys created on [kraken.com](https://www.kraken.com/u/security/api) only work with the Spot REST API and Spot WebSocket streams. Keys created on [futures.kraken.com](https://futures.kraken.com/settings/api) only work with the Derivatives REST API and Derivatives WebSocket streams. See the [authentication guide](/authentication) for step-by-step instructions on creating keys with the right permissions.
+    </Note>
+
+    ```typescript
+    import { SpotClient } from '@siebly/kraken-api';
+
+    const client = new SpotClient({
+      apiKey: process.env.API_SPOT_KEY!,
+      apiSecret: process.env.API_SPOT_SECRET!,
+    });
+
+    async function main() {
+      // Fetch account balances
+      const balance = await client.getAccountBalance();
+      console.log('Account balance:', balance);
+
+      // Place a limit buy order (use validate: true to test without submitting)
+      const order = await client.submitOrder({
+        ordertype: 'limit',
+        type: 'buy',
+        pair: 'XBTUSD',
+        volume: '0.0001',
+        price: '10000',
+        validate: true, // remove this line to submit a real order
+        cl_ord_id: client.generateNewOrderID(),
+      });
+      console.log('Order result:', order);
+    }
+
+    main().catch(console.error);
+    ```
+
+    Store your API keys in environment variables — never hardcode them in source files. Use `process.env` to read them at runtime, or a `.env` file loaded via Node's `--env-file` flag or a library like `dotenv`.
+
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Next steps
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+- **Full SpotClient reference** — browse every available method and its parameters in the [SpotClient docs](/rest/spot-client).
+- **WebSocket streams** — explore all available public and private subscription topics in the [WebSocket overview](/websockets/overview).
+- **Authentication** — learn how to create Kraken API keys, understand the Spot/Futures credential split, and configure credentials securely in the [authentication guide](/authentication).

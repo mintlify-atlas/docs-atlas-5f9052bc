@@ -1,0 +1,404 @@
+---
+title: "Low-Latency Spot Trading with WebsocketAPIClient"
+sidebarTitle: "WS API Client"
+description: "Use WebsocketAPIClient to send and await Spot order management commands over a persistent WebSocket connection, with the convenience of promise-based async/await."
+---
+
+`WebsocketAPIClient` is a thin, ergonomic wrapper around `WebsocketClient` that exposes Kraken's Spot WebSocket API as a set of awaitable async methods. Instead of opening a new HTTP connection for every order operation, `WebsocketAPIClient` maintains a single persistent authenticated WebSocket connection and routes each command through it — returning a resolved promise when the server replies.
+
+The interface deliberately feels like a REST client: call a method, await the result, inspect the response. The underlying transport is WebSocket, which means significantly lower latency and reduced overhead compared with REST, without any of the raw WebSocket plumbing in your code.
+
+---
+
+## When to use it
+
+<CardGroup cols={2}>
+  <Card title="Lower latency" icon="gauge-high">
+    Avoids per-request TLS handshakes and TCP connection setup. The connection is opened once and kept alive.
+  </Card>
+  <Card title="Connection reuse" icon="rotate">
+    A single authenticated connection handles all order commands. No token re-fetch overhead per request.
+  </Card>
+  <Card title="Awaitable like REST" icon="brackets-curly">
+    Each method returns a `Promise` that resolves with the typed server response. Use standard `async/await` patterns.
+  </Card>
+  <Card title="Spot only" icon="circle-info">
+    Currently only Spot order management is available over the WebSocket API. Use `WebsocketClient` for Futures account streams.
+  </Card>
+</CardGroup>
+
+---
+
+## Setup
+
+Instantiate `WebsocketAPIClient` with your Spot API credentials. The underlying `WebsocketClient` connection is managed internally and made accessible via `getWSClient()`.
+
+```typescript
+import { WebsocketAPIClient } from '@siebly/kraken-api';
+
+const wsApi = new WebsocketAPIClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+```
+
+### `attachEventListeners` option
+
+By default (`attachEventListeners: true`), `WebsocketAPIClient` attaches console-logging event handlers for `open`, `reconnecting`, `reconnected`, `authenticated`, and `exception`. These are useful during development but you may want to replace them in production with your own handlers.
+
+```typescript
+const wsApi = new WebsocketAPIClient(
+  {
+    apiKey: process.env.API_SPOT_KEY!,
+    apiSecret: process.env.API_SPOT_SECRET!,
+    attachEventListeners: false, // Disable default console logging
+  },
+);
+
+// Now attach your own handlers via the underlying WebsocketClient
+wsApi.getWSClient().on('open', (data) => {
+  console.log('ws api connected:', data.wsKey);
+});
+
+wsApi.getWSClient().on('authenticated', (data) => {
+  console.log('ws api authenticated:', data.wsKey);
+});
+
+wsApi.getWSClient().on('reconnecting', ({ wsKey }) => {
+  console.warn('ws api reconnecting:', wsKey);
+  // Pause order activity during reconnect
+});
+
+wsApi.getWSClient().on('reconnected', (data) => {
+  console.log('ws api reconnected:', data.wsKey);
+  // Reconcile order state via REST API
+});
+
+wsApi.getWSClient().on('exception', (data) => {
+  console.error('ws api exception:', JSON.stringify(data));
+});
+```
+
+### `getWSClient()`
+
+`getWSClient()` returns the underlying `WebsocketClient` instance. Use it to attach event listeners, or to call `subscribe()` if you want to combine WS API trading with topic subscriptions on the same client instance.
+
+```typescript
+const underlyingClient = wsApi.getWSClient();
+
+underlyingClient.on('authenticated', (data) => {
+  console.log('auth confirmed on:', data.wsKey);
+});
+```
+
+### Pre-warming the connection
+
+The SDK connects and authenticates automatically on the first command. If you want to eliminate first-request latency, call `connectWSAPI()` before issuing orders:
+
+```typescript
+import { WS_KEY_MAP } from '@siebly/kraken-api';
+
+// Pre-warm the connection and auth before your first order
+await wsApi.connectWSAPI(WS_KEY_MAP.spotPrivateV2);
+
+// Now the first order goes out on an already-authenticated connection
+const result = await wsApi.submitSpotOrder({ ... });
+```
+
+---
+
+## Available methods
+
+### `submitSpotOrder()` — place a new order
+
+Submit a new Spot order. Supports limit, market, iceberg, stop-loss, stop-loss-limit, take-profit, take-profit-limit, trailing-stop, trailing-stop-limit, and settle-position order types, as well as conditional (bracket) orders and trigger-based orders.
+
+<CodeGroup>
+```typescript Limit order
+const response = await wsApi.submitSpotOrder({
+  order_type: 'limit',
+  side: 'buy',
+  symbol: 'BTC/USD',
+  order_qty: 1.2,
+  limit_price: 26500.4,
+  order_userref: 100054, // optional client-side reference
+});
+
+console.log('submitted:', response);
+```
+
+```typescript Conditional (bracket) order
+const response = await wsApi.submitSpotOrder({
+  order_type: 'limit',
+  side: 'buy',
+  symbol: 'BTC/USD',
+  order_qty: 1.2,
+  limit_price: 28440,
+  conditional: {
+    order_type: 'stop-loss-limit',
+    trigger_price: 28410,
+    limit_price: 28400,
+  },
+});
+```
+
+```typescript Trigger-based order
+const response = await wsApi.submitSpotOrder({
+  order_type: 'stop-loss',
+  side: 'sell',
+  symbol: 'MATIC/USD',
+  order_qty: 100,
+  triggers: {
+    reference: 'last',
+    price: 10.0,
+    price_type: 'pct',
+  },
+});
+```
+</CodeGroup>
+
+---
+
+### `amendSpotOrder()` — amend price or quantity
+
+Amend an existing open order by `order_id` or `cl_ord_id`. Only the fields you provide are changed; omitted fields retain their original values.
+
+```typescript
+// Amend by client order ID
+const response = await wsApi.amendSpotOrder({
+  cl_ord_id: '2c6be801-1f53-4f79-a0bb-4ea1c95dfae9',
+  limit_price: 10000,
+  order_qty: 1.2,
+});
+
+// Amend by exchange order ID with post-only flag and deadline
+const response2 = await wsApi.amendSpotOrder({
+  order_id: 'OAIYAU-LGI3M-PFM5VW',
+  order_qty: 1.2,
+  limit_price: 1100.3,
+  deadline: '2025-11-19T09:53:59.050Z',
+  post_only: true,
+});
+```
+
+---
+
+### `editSpotOrder()` — legacy order edit
+
+Edit an existing order using the legacy `edit_order` method. This replaces the entire order. For better performance and more granular control, prefer `amendSpotOrder()`.
+
+```typescript
+const response = await wsApi.editSpotOrder({
+  order_id: 'OAIYAU-LGI3M-PFM5VW',
+  symbol: 'BTC/USD',
+  order_qty: 0.5,
+  limit_price: 29000,
+});
+```
+
+<Note>
+  `editSpotOrder()` is deprecated in favour of `amendSpotOrder()`. Use `amendSpotOrder()` for new integrations.
+</Note>
+
+---
+
+### `cancelSpotOrder()` — cancel one or more orders
+
+Cancel one or more orders by passing their IDs in an array. Supports exchange order IDs (`order_id`), client order IDs (`cl_ord_id`), or user references (`order_userref`).
+
+```typescript
+const response = await wsApi.cancelSpotOrder({
+  order_id: ['OM5CRX-N2HAL-GFGWE9', 'OLUMT4-UTEGU-ZYM7E9'],
+});
+
+console.log('cancelled:', response);
+```
+
+---
+
+### `cancelAllSpotOrders()` — cancel everything
+
+Cancel all open Spot orders on your account in a single call.
+
+```typescript
+const response = await wsApi.cancelAllSpotOrders();
+
+console.log('all orders cancelled:', response);
+```
+
+---
+
+### `cancelAllSpotOrdersAfter()` — dead man's switch
+
+Set a timer in seconds. If the timer expires before it is refreshed or cancelled, all open orders are automatically cancelled. Call with `timeout: 0` to disarm the timer.
+
+```typescript
+// Arm the dead man's switch: cancel all orders in 100 seconds if not refreshed
+const response = await wsApi.cancelAllSpotOrdersAfter({ timeout: 100 });
+
+// Disarm: set timeout to 0
+await wsApi.cancelAllSpotOrdersAfter({ timeout: 0 });
+```
+
+<Warning>
+  The dead man's switch timer is reset each time you call `cancelAllSpotOrdersAfter()`. If your system crashes without disarming the timer, all open orders will be cancelled automatically. This is intentional behaviour — use it as a safety net for automated trading systems.
+</Warning>
+
+---
+
+### `batchSubmitSpotOrders()` — submit multiple orders at once
+
+Submit 2 to 15 orders in a single request. All orders in a batch must share the same `symbol`.
+
+```typescript
+const response = await wsApi.batchSubmitSpotOrders({
+  symbol: 'BTC/USD',
+  deadline: '2025-11-19T09:53:59.050Z',
+  validate: false, // Set to true to validate without placing
+  orders: [
+    {
+      limit_price: 1010.1,
+      order_qty: 1.2,
+      order_type: 'limit',
+      order_userref: 1,
+      side: 'buy',
+    },
+    {
+      limit_price: 1100.3,
+      order_qty: 1.2,
+      order_type: 'limit',
+      order_userref: 2,
+      side: 'sell',
+      stp_type: 'cancel_both',
+    },
+  ],
+});
+
+console.log('batch submitted:', response);
+```
+
+---
+
+### `batchCancelSpotOrders()` — cancel multiple orders at once
+
+Cancel 2 to 50 orders in a single batch request by providing their order IDs.
+
+```typescript
+const response = await wsApi.batchCancelSpotOrders({
+  orders: ['OM5CRX-N2HAL-GFGWE9', 'OLUMT4-UTEGU-ZYM7E9'],
+});
+
+console.log('batch cancelled:', response);
+```
+
+---
+
+## Full example
+
+```typescript
+import { WebsocketAPIClient } from '@siebly/kraken-api';
+
+async function main() {
+  const wsApi = new WebsocketAPIClient({
+    apiKey: process.env.API_SPOT_KEY!,
+    apiSecret: process.env.API_SPOT_SECRET!,
+    attachEventListeners: false,
+  });
+
+  wsApi.getWSClient().on('open', (data) => {
+    console.log('connected:', data.wsKey);
+  });
+
+  wsApi.getWSClient().on('authenticated', (data) => {
+    console.log('authenticated:', data.wsKey);
+  });
+
+  wsApi.getWSClient().on('reconnecting', ({ wsKey }) => {
+    console.warn('reconnecting — pausing order activity:', wsKey);
+  });
+
+  wsApi.getWSClient().on('reconnected', (data) => {
+    console.log('reconnected:', data.wsKey);
+  });
+
+  wsApi.getWSClient().on('exception', (data) => {
+    console.error('exception:', JSON.stringify(data));
+  });
+
+  try {
+    // Place a limit buy
+    const order = await wsApi.submitSpotOrder({
+      order_type: 'limit',
+      side: 'buy',
+      symbol: 'BTC/USD',
+      order_qty: 1.2,
+      limit_price: 26500.4,
+      order_userref: 100054,
+    });
+    console.log('order placed:', order);
+
+    // Amend the order price
+    const amended = await wsApi.amendSpotOrder({
+      order_id: order.result.order_id,
+      limit_price: 27000,
+      order_qty: 1.2,
+    });
+    console.log('order amended:', amended);
+
+    // Cancel the order
+    const cancelled = await wsApi.cancelSpotOrder({
+      order_id: [order.result.order_id],
+    });
+    console.log('order cancelled:', cancelled);
+
+    // Set a dead man's switch
+    await wsApi.cancelAllSpotOrdersAfter({ timeout: 60 });
+
+    // Batch submit two orders
+    const batch = await wsApi.batchSubmitSpotOrders({
+      symbol: 'BTC/USD',
+      orders: [
+        { order_type: 'limit', side: 'buy', order_qty: 0.1, limit_price: 25000 },
+        { order_type: 'limit', side: 'sell', order_qty: 0.1, limit_price: 30000 },
+      ],
+    });
+    console.log('batch submitted:', batch);
+
+    // Cancel all open orders
+    const cancelAll = await wsApi.cancelAllSpotOrders();
+    console.log('all cancelled:', cancelAll);
+
+  } catch (e) {
+    console.error('request error:', e);
+  }
+}
+
+main();
+```
+
+---
+
+## Tips
+
+<Tip>
+  Use `validate: true` in `submitSpotOrder()` or `batchSubmitSpotOrders()` to verify your request shape against the exchange without placing a live order. Switch `validate` to `false` — or omit it — when you are ready to go live.
+</Tip>
+
+<Tip>
+  Combine `WebsocketAPIClient` with a `WebsocketClient` subscription on `executions` (via `getWSClient().subscribe(...)`) to both place orders and receive fill confirmations on the same underlying connection.
+</Tip>
+
+---
+
+## Method reference
+
+| Method | WS API operation | Description |
+|---|---|---|
+| `submitSpotOrder(params)` | `add_order` | Place a new Spot order |
+| `amendSpotOrder(params)` | `amend_order` | Amend price or quantity of an open order |
+| `editSpotOrder(params)` | `edit_order` | Legacy full order replacement (deprecated) |
+| `cancelSpotOrder(params)` | `cancel_order` | Cancel one or more orders by ID |
+| `cancelAllSpotOrders()` | `cancel_all` | Cancel all open orders |
+| `cancelAllSpotOrdersAfter(params)` | `cancel_all_orders_after` | Dead man's switch with configurable timeout |
+| `batchSubmitSpotOrders(params)` | `batch_add` | Submit 2–15 orders in a single batch |
+| `batchCancelSpotOrders(params)` | `batch_cancel` | Cancel 2–50 orders in a single batch |

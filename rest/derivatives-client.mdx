@@ -1,0 +1,409 @@
+---
+title: "DerivativesClient: Kraken Futures REST API Methods"
+sidebarTitle: "Derivatives Client"
+description: "DerivativesClient covers all Kraken Futures REST endpoints for perpetual and fixed-maturity contracts, including market data, order management, and account state."
+---
+
+`DerivativesClient` provides full access to the [Kraken Futures REST API](https://docs.kraken.com/api/docs/guides/futures-introduction). It covers all perpetual and fixed-maturity contract markets — market data, order book snapshots, candles, open positions, fill history, account state, leverage settings, batch order management, and transfers between Futures and Spot wallets. All live requests are routed to `https://futures.kraken.com`.
+
+<Note>
+  Kraken Futures uses **separate API keys** from the Spot exchange. Generate dedicated Futures API keys in your Kraken account under **Settings → API → Futures**. Spot API keys will not authenticate Futures endpoints.
+</Note>
+
+---
+
+## Constructor
+
+<CodeGroup>
+```typescript Public (no credentials)
+import { DerivativesClient } from '@siebly/kraken-api';
+
+// Public market data requires no authentication
+const client = new DerivativesClient();
+```
+
+```typescript Private (with credentials)
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+```
+
+```typescript Testnet / Demo environment
+import { DerivativesClient } from '@siebly/kraken-api';
+
+// Routes to https://demo-futures.kraken.com
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_DEMO_KEY,
+  apiSecret: process.env.API_FUTURES_DEMO_SECRET,
+  testnet: true,
+});
+```
+</CodeGroup>
+
+<Tip>
+  The demo environment (`testnet: true`) points to `https://demo-futures.kraken.com`. It is intended for API integration testing — the order book dynamics and liquidity differ significantly from production.
+</Tip>
+
+---
+
+## Symbol Conventions
+
+Kraken Futures symbols follow a structured prefix convention that identifies the contract type:
+
+| Prefix | Type | Example |
+|---|---|---|
+| `PF_` | Perpetual Futures (multi-collateral) | `PF_BTCUSD`, `PF_ETHUSD` |
+| `PI_` | Perpetual Inverse Futures | `PI_XBTUSD` |
+| `FI_` | Inverse Fixed-Maturity Futures | `FI_XBTUSD_250328` |
+| `FF_` | Flex (multi-collateral) Fixed-Maturity Futures | `FF_XBTUSD_250328` |
+| `IN_` | Index | `IN_XBTUSD` |
+
+Use `getInstruments()` to fetch the full list of currently listed symbols with their specifications.
+
+---
+
+## Available Endpoints
+
+<Tabs>
+  <Tab title="Public Endpoints">
+    Public methods require no authentication.
+
+    | Method | Description |
+    |---|---|
+    | `getInstruments()` | All currently listed contracts and indices with full specifications (tick size, contract size, leverage, etc.). |
+    | `getInstrumentStatusList()` | Price dislocation and volatility status for all markets. |
+    | `getInstrumentStatus(params)` | Price dislocation and volatility status for a single market. |
+    | `getTickers()` | Live market data for all contracts and indices (last price, mark price, bid/ask, 24h volume, open interest, funding rate). |
+    | `getTicker(params)` | Market data for a single contract or index by symbol. |
+    | `getOrderbook(params)` | Full non-cumulative order book for a contract. |
+    | `getTradeHistory(params)` | The 100 most recent trades for a symbol (up to 7 days back). |
+    | `getHistoricalFundingRates(params)` | Historical funding rate series for a perpetual contract. |
+    | `getFeeSchedules()` | All fee schedules with maker/taker tiers. **Deprecated** as of 2026-06-22 — use `SpotClient.getTradingVolume()` instead. |
+    | `getPublicExecutionEvents(params)` | Public trade executions for a market (market history). |
+    | `getPublicOrderEvents(params)` | Public order events for a market. |
+    | `getPublicMarkPriceEvents(params)` | Public mark price events for a market. |
+    | `getTickTypes()` | Available tick types for use with the candle endpoints. |
+    | `getMarketsForTickType(params)` | Markets available for a given tick type. |
+    | `getResolutions(params)` | Candle resolutions available for a given tick type and symbol. |
+    | `getCandles(params)` | OHLC candles for a given tick type, symbol, and resolution. |
+    | `getLiquidityPoolStatistic(params)` | Liquidity pool statistics including USD value. |
+    | `getMarketAnalytics(params)` | Market analytics data in time buckets. |
+    | `getOpenRFQs()` | All currently open RFQs (demo environment only). |
+    | `getOpenRFQ(params)` | A single open RFQ by UID (demo environment only). |
+  </Tab>
+
+  <Tab title="Private Endpoints">
+    Private methods require a valid `apiKey` and `apiSecret`.
+
+    **Account Information**
+
+    | Method | Description |
+    |---|---|
+    | `getAccounts()` | All wallets — balances, margin requirements, PnL, portfolio value, and auxiliary info. |
+    | `getOpenPositions()` | All open positions across all Futures contracts — size, side, average entry price. |
+    | `getPositionPercentile()` | Queue percentile for open positions in case of forced unwinding. |
+    | `getPnlPreferences()` | PNL currency preferences for multi-collateral accounts. |
+    | `setPnlPreference(params)` | Set the PNL payout currency for a specific contract. |
+    | `getLeverageSettings()` | All configured leverage preferences (isolated vs cross margin, max leverage). |
+    | `setLeverageSettings(params)` | Set margin mode and max leverage for a specific contract. |
+    | `getPortfolioMarginParameters()` | Portfolio margin parameters (demo environment only). |
+    | `simulateMarginRequirements(params)` | Simulate margin, PnL, and option greeks for a portfolio (demo environment only). |
+
+    **Order Management**
+
+    | Method | Description |
+    |---|---|
+    | `submitOrder(params)` | Send a limit (`lmt`), market (`mkt`), post-only (`post`), stop, or take-profit order. |
+    | `editOrder(params)` | Modify an open order's price or size. |
+    | `cancelOrder(params)` | Cancel a single open order by order ID or client order ID. |
+    | `cancelAllOrders(params?)` | Cancel all open orders, optionally scoped to a single symbol. |
+    | `cancelAllOrdersAfter(params)` | Dead Man's Switch — cancel all orders after `timeout` seconds unless refreshed. |
+    | `batchOrderManagement(params)` | Send, edit, and cancel orders in a single atomic batch request. |
+    | `getOpenOrders()` | All currently open orders across all contracts. |
+    | `getOrderStatus(params?)` | Status of specific orders (open or recently filled/cancelled in the last 5 seconds). |
+
+    **Trade & Account History**
+
+    | Method | Description |
+    |---|---|
+    | `getFills(params?)` | Your filled orders — returns 100 most recent by default. |
+    | `getExecutionEvents(params?)` | Full execution event history for your account. |
+    | `getOrderEvents(params?)` | Order lifecycle events (placed, filled, cancelled, rejected). |
+    | `getTriggerEvents(params?)` | Trigger events for stop/take-profit orders. |
+    | `getPositionEvents(params?)` | Position change events. |
+    | `getAccountLog(params?)` | Paginated account log — trades, funding, liquidations, transfers, settlements. |
+    | `getAccountLogCsv(params?)` | Recent account log entries as a CSV string. |
+
+    **Transfers & Subaccounts**
+
+    | Method | Description |
+    |---|---|
+    | `submitWalletTransfer(params)` | Transfer between margin accounts or between a margin account and the cash account. |
+    | `submitSubaccountTransfer(params)` | Transfer involving a subaccount. |
+    | `submitTransferToSpot(params)` | Withdraw from Futures wallet to Kraken Spot wallet. |
+    | `getSubaccounts()` | All subaccounts with balances and UIDs. |
+    | `getSubaccountTradingStatus(params)` | Trading capabilities for a given subaccount. |
+    | `updateSubaccountTradingStatus(params)` | Enable or disable trading for a subaccount. |
+
+    **Notifications & Settings**
+
+    | Method | Description |
+    |---|---|
+    | `getNotifications()` | Platform notifications. |
+    | `getSelfTradeStrategy()` | Account-wide self-trade matching strategy. |
+    | `updateSelfTradeStrategy(params)` | Update the self-trade matching behavior. |
+    | `getFeeScheduleVolumes()` | Your fee schedule volumes per schedule. **Deprecated** as of 2026-06-22. |
+    | `checkApiKeyV3()` | Verify API key access and return key details. |
+    | `getAccountMarketShare()` | Market share, volumes, and accrued rebates for rebate-enabled contracts. |
+
+    **Assignment Program**
+
+    | Method | Description |
+    |---|---|
+    | `getAssignmentPrograms()` | Currently active assignment programs. |
+    | `addAssignmentPreference(params)` | Add an assignment program preference. |
+    | `deleteAssignmentPreference(params)` | Remove an assignment program preference. |
+    | `getAssignmentPreferencesHistory()` | History of assignment preference changes. |
+
+    **RFQs (Demo Only)**
+
+    | Method | Description |
+    |---|---|
+    | `getRFQOpenOffers()` | Open offers on currently open RFQs. |
+    | `submitRFQNewOffer(params)` | Place a new offer on an open RFQ. |
+    | `updateRFQOpenOffer(params)` | Replace an existing open offer on an RFQ. |
+    | `cancelRFQOffer(params)` | Cancel an open offer on an RFQ. |
+  </Tab>
+</Tabs>
+
+---
+
+## Usage Examples
+
+### Public Market Data
+
+<CodeGroup>
+```typescript getTickers & getOrderbook
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient();
+
+// All tickers — mark price, bid/ask, volume, funding rate
+const tickers = await client.getTickers();
+console.log('All Tickers:', JSON.stringify(tickers, null, 2));
+
+// Order book for a specific perpetual contract
+const orderBook = await client.getOrderbook({ symbol: 'PF_ETHUSD' });
+console.log('Order Book:', JSON.stringify(orderBook, null, 2));
+```
+
+```typescript getCandles
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient();
+
+// 1-hour trade-price candles for PF_ETHUSD
+const candles = await client.getCandles({
+  tickType: 'trade',    // 'trade' | 'mark' | 'spot'
+  symbol: 'PF_ETHUSD',
+  resolution: '1h',    // '1m' | '5m' | '15m' | '30m' | '1h' | '4h' | '12h' | '1d' | '1w'
+});
+console.log('Candles:', JSON.stringify(candles, null, 2));
+
+// Fetch a specific time range (epoch seconds)
+const candlesRange = await client.getCandles({
+  tickType: 'mark',
+  symbol: 'PF_ETHUSD',
+  resolution: '1h',
+  from: Math.floor((Date.now() - 86400000 * 7) / 1000), // 7 days ago
+  to: Math.floor(Date.now() / 1000),
+});
+console.log('7-Day Candles:', JSON.stringify(candlesRange, null, 2));
+```
+
+```typescript getHistoricalFundingRates
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient();
+
+// Historical funding rates for a perpetual contract
+const fundingRates = await client.getHistoricalFundingRates({
+  symbol: 'PF_BTCUSD',
+});
+console.log('Funding Rates:', JSON.stringify(fundingRates, null, 2));
+```
+</CodeGroup>
+
+### Account
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+
+const wallets = await client.getAccounts();
+// wallets.result.accounts contains:
+// - cash: { balances: { XBT, USDT, ... } }
+// - flex: { currencies: {...}, auxiliary: { pv, pnl, af, funding }, marginRequirements: { im, mm } }
+console.log('Accounts:', JSON.stringify(wallets, null, 2));
+```
+
+### Order Management
+
+<CodeGroup>
+```typescript submitOrder — limit & market
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+
+// Limit buy order
+const limitOrder = await client.submitOrder({
+  orderType: 'lmt',
+  symbol: 'PF_ETHUSD',
+  side: 'buy',
+  size: 0.01,
+  limitPrice: 1000,
+  cliOrdId: client.generateNewOrderID(),
+});
+console.log('Limit Order:', JSON.stringify(limitOrder, null, 2));
+
+// Market sell order
+const marketOrder = await client.submitOrder({
+  orderType: 'mkt',
+  symbol: 'PF_ETHUSD',
+  side: 'sell',
+  size: 0.01,
+});
+console.log('Market Order:', JSON.stringify(marketOrder, null, 2));
+```
+
+```typescript submitOrder — post-only & reduce-only
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+
+// Post-only order (maker-only, rejected if it would fill immediately)
+const postOnly = await client.submitOrder({
+  orderType: 'post',
+  symbol: 'PF_ETHUSD',
+  side: 'buy',
+  size: 0.01,
+  limitPrice: 1000,
+  cliOrdId: client.generateNewOrderID(),
+});
+console.log('Post-Only:', JSON.stringify(postOnly, null, 2));
+
+// Reduce-only order (closes position, will not open new exposure)
+const reduceOnly = await client.submitOrder({
+  orderType: 'lmt',
+  symbol: 'PF_ETHUSD',
+  side: 'sell',
+  size: 1,
+  limitPrice: 1000,
+  reduceOnly: true,
+});
+console.log('Reduce-Only:', JSON.stringify(reduceOnly, null, 2));
+```
+
+```typescript batchOrderManagement
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+
+// Send, edit, and cancel orders in one atomic request
+const batchResult = await client.batchOrderManagement({
+  json: {
+    batchOrder: [
+      {
+        order: 'send',
+        order_tag: 'entry-buy',
+        orderType: 'lmt',
+        symbol: 'PF_ETHUSD',
+        side: 'buy',
+        size: 0.01,
+        limitPrice: 1000,
+        cliOrdId: client.generateNewOrderID(),
+      },
+      {
+        order: 'send',
+        order_tag: 'entry-buy-2',
+        orderType: 'lmt',
+        symbol: 'PF_ETHUSD',
+        side: 'buy',
+        size: 0.01,
+        limitPrice: 1100,
+      },
+    ],
+  },
+});
+console.log('Batch Result:', JSON.stringify(batchResult, null, 2));
+// batchResult.result.batchStatus[n].status — 'placed' | rejection reason
+```
+</CodeGroup>
+
+### Position Management
+
+<CodeGroup>
+```typescript getOpenPositions
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+
+const positions = await client.getOpenPositions();
+// Each position: { symbol, side, size, price, fillTime, unrealizedFunding }
+console.log('Open Positions:', JSON.stringify(positions, null, 2));
+```
+
+```typescript getLeverageSettings & setLeverageSettings
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient({
+  apiKey: process.env.API_FUTURES_KEY,
+  apiSecret: process.env.API_FUTURES_SECRET,
+});
+
+// Read current leverage configuration
+const leverageSettings = await client.getLeverageSettings();
+console.log('Leverage Settings:', JSON.stringify(leverageSettings, null, 2));
+
+// Set isolated margin with 10x max leverage on PF_ETHUSD
+await client.setLeverageSettings({
+  symbol: 'PF_ETHUSD',
+  maxLeverage: 10, // omit for cross-margin mode
+});
+```
+</CodeGroup>
+
+---
+
+## Further Reading
+
+<CardGroup cols={2}>
+  <Card title="Market Data Reference" href="/reference/derivatives/market-data">
+    Full parameter documentation for all public Futures endpoints.
+  </Card>
+  <Card title="Account Reference" href="/reference/derivatives/account">
+    Wallets, positions, fills, and history endpoint details.
+  </Card>
+  <Card title="Orders Reference" href="/reference/derivatives/orders">
+    Order types, batch management, and Dead Man's Switch details.
+  </Card>
+</CardGroup>

@@ -1,0 +1,443 @@
+---
+title: "SpotClient: Kraken Spot REST API Methods"
+sidebarTitle: "Spot Client"
+description: "SpotClient covers all Kraken Spot REST endpoints — market data, account state, order management, staking/earn, deposits, and withdrawals — with full TypeScript types."
+---
+
+`SpotClient` is the primary client for interacting with the [Kraken Spot REST API](https://docs.kraken.com/api/docs/guides/spot-rest-intro/). It covers market data (tickers, order books, candles, spreads), full account state (balances, open orders, positions, ledgers), order lifecycle (submit, amend, cancel, batch), the Earn/staking subsystem, and all deposit and withdrawal operations. All requests are routed to the base URL `https://api.kraken.com`.
+
+---
+
+## Constructor
+
+Instantiate `SpotClient` without credentials for public endpoints, or with an API key and secret for private endpoints.
+
+<CodeGroup>
+```typescript Public (no credentials)
+import { SpotClient } from '@siebly/kraken-api';
+
+// Public endpoints require no authentication
+const client = new SpotClient();
+```
+
+```typescript Private (with credentials)
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET, // base64-encoded private key
+});
+```
+</CodeGroup>
+
+<Note>
+  Kraken Spot API keys use a base64-encoded private key as the secret — not a plain text secret. Make sure you copy the full base64 string from the Kraken web interface.
+</Note>
+
+---
+
+## Available Endpoints
+
+<Tabs>
+  <Tab title="Public Endpoints">
+    Public methods do not require API credentials and can be called on an unauthenticated `SpotClient` instance.
+
+    | Method | Description |
+    |---|---|
+    | `getServerTime()` | Returns the current server time as Unix timestamp and RFC 1123 string. |
+    | `getSystemStatus()` | Returns the current system status and trading mode (`online`, `cancel_only`, `post_only`, `limit_only`, `maintenance`). |
+    | `getAssetInfo(params?)` | Returns information about available assets — decimals, display decimals, status, and collateral value. |
+    | `getAssetPairs(params?)` | Returns specifications for tradeable asset pairs — tick size, order minimums, available leverage, and fee tiers. |
+    | `getTicker(params?)` | Returns ticker data for one or all pairs. Leaving `pair` empty returns all tradeable markets. |
+    | `getCandles(params)` | Returns up to 720 OHLC candles. The last candle is for the current, not-yet-committed interval. |
+    | `getOrderBook(params)` | Returns the L2 order book with aggregated quantities at each price level. |
+    | `getRecentTrades(params)` | Returns the last 1 000 trades by default. |
+    | `getRecentSpreads(params)` | Returns the last ~200 top-of-book spreads for a given pair. |
+    | `getPreTradeData(params)` | Returns the top 10 price levels of the order book per pair for transparency reporting. |
+    | `getPostTradeData(params?)` | Returns the last 1 000 spot trades across all pairs (or filtered). |
+  </Tab>
+
+  <Tab title="Private Endpoints">
+    Private methods require a valid `apiKey` and `apiSecret` in the constructor.
+
+    **Account**
+
+    | Method | Description |
+    |---|---|
+    | `getAccountBalance(params?)` | Cash balances net of pending withdrawals. |
+    | `getExtendedBalance(params?)` | Extended balances including credits, holds, and credit usage. |
+    | `getCreditLines(params?)` | Credit line details for VIP accounts. |
+    | `getTradeBalance(params?)` | Margin summary — collateral, equity, margin level, and unrealized P&L. |
+    | `getOpenPositions(params?)` | Open margin positions. |
+    | `getTradesHistory(params?)` | Closed trade history (50 per page, most recent first). |
+    | `getTrades(params)` | Query specific trades by transaction ID. |
+    | `getLedgersInfo(params?)` | Ledger entries (50 per page). Supports filtering by asset and entry type. |
+    | `getLedgers(params)` | Query specific ledger entries by ID. |
+    | `getTradingVolume(params?)` | 30-day USD trading volume and applicable fee schedule. Also used to determine Futures fee rates as of 2026-06-22. |
+    | `requestLedgersExport(params)` | Request an async export of trades or ledgers. |
+    | `getLedgersExportStatus(params)` | Check the status of a pending export. |
+    | `getLedgersExport(params)` | Download a completed export as a binary ZIP archive. |
+    | `deleteLedgersExport(params)` | Cancel or delete a previously requested export. |
+    | `getWebSocketsToken()` | Obtain a short-lived token for authenticating WebSocket connections. Valid for 15 minutes. |
+
+    **Orders**
+
+    | Method | Description |
+    |---|---|
+    | `getOpenOrders(params?)` | All currently open orders. |
+    | `getClosedOrders(params?)` | Filled and cancelled orders (50 per page). |
+    | `getOrders(params)` | Query specific orders by transaction ID or user reference. |
+    | `getOrderAmends(params)` | Audit trail of amend operations on a specific order. |
+    | `submitOrder(params)` | Place a new order (market, limit, stop-loss, take-profit, etc.). |
+    | `amendOrder(params)` | Amend an open order while preserving its queue priority where possible. |
+    | `cancelOrder(params)` | Cancel one or more open orders by `txid` or `cl_ord_id`. |
+    | `cancelAllOrders()` | Cancel all open orders immediately. |
+    | `cancelAllOrdersAfter(params)` | Dead Man's Switch — cancel all orders after `timeout` seconds unless refreshed. |
+    | `submitBatchOrders(params)` | Submit 2–15 orders for the same pair atomically. |
+    | `cancelBatchOrders(params)` | Cancel up to 50 orders in a single request. |
+
+    **Funding & Earn**
+
+    | Method | Description |
+    |---|---|
+    | `getDepositMethods(params)` | Available deposit methods for an asset. |
+    | `getDepositAddresses(params)` | Retrieve or generate a deposit address. |
+    | `getDepositsStatus(params?)` | Recent deposit history. |
+    | `getWithdrawalMethods(params?)` | Available withdrawal methods. |
+    | `getWithdrawalAddresses(params?)` | Saved withdrawal addresses. |
+    | `getWithdrawalInfo(params)` | Fee estimate for a prospective withdrawal. |
+    | `submitWithdrawal(params)` | Initiate a withdrawal request. |
+    | `getWithdrawalsStatus(params?)` | Recent withdrawal history. |
+    | `cancelWithdrawal(params)` | Cancel a pending withdrawal. |
+    | `submitTransferToFutures(params)` | Transfer from Spot wallet to Futures wallet. |
+    | `getEarnStrategies(params?)` | List all available Earn strategies for your region. |
+    | `getEarnAllocations(params?)` | List current and historical Earn allocations. |
+    | `allocateEarnFunds(params)` | Allocate funds to an Earn strategy (async). |
+    | `deallocateEarnFunds(params)` | Deallocate funds from an Earn strategy (async). |
+    | `getEarnAllocationStatus(params)` | Poll the status of the last allocation request. |
+    | `getEarnDeallocationStatus(params)` | Poll the status of the last deallocation request. |
+
+    **Subaccounts**
+
+    | Method | Description |
+    |---|---|
+    | `createSubaccount(params)` | Create a trading subaccount (must be called from the master account). |
+    | `submitSubaccountTransfer(params)` | Transfer funds between master and subaccounts. |
+
+    **OAuth**
+
+    | Method | Description |
+    |---|---|
+    | `getOAuthAccessToken(params)` | Exchange credentials for an OAuth2 access token. |
+    | `getOAuthUserInfo()` | Return the authenticated user's email and IIBAN (requires Bearer token). |
+    | `createOAuthFastApiKey(params)` | Create a Fast API key via OAuth. |
+    | `updateOAuthFastApiKey(params)` | Update a Fast API key. |
+    | `deleteOAuthFastApiKey(params)` | Delete a Fast API key. |
+    | `listOAuthFastApiKeys()` | List all Fast API keys. |
+  </Tab>
+</Tabs>
+
+---
+
+## Usage Examples
+
+### Public Market Data
+
+<CodeGroup>
+```typescript getTicker & getOrderBook
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+// Get ticker for a single pair
+const ticker = await client.getTicker({ pair: 'XBTUSD' });
+console.log('Ticker:', ticker);
+
+// Get L2 order book (top 10 levels)
+const orderBook = await client.getOrderBook({ pair: 'XBTUSD', count: 10 });
+console.log('Order Book:', orderBook);
+```
+
+```typescript getCandles
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+// 1-hour OHLC candles for XBT/USD (up to 720 candles)
+const candles = await client.getCandles({
+  pair: 'XBTUSD',
+  interval: 60, // minutes: 1, 5, 15, 30, 60, 240, 1440, 10080, 21600
+});
+console.log('Candles:', candles);
+```
+</CodeGroup>
+
+### Account Data
+
+<CodeGroup>
+```typescript getAccountBalance & getTradeBalance
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Cash balances net of pending withdrawals
+const balances = await client.getAccountBalance();
+console.log('Balances:', JSON.stringify(balances, null, 2));
+
+// Margin summary (equity, free margin, unrealized P&L)
+const tradeBalance = await client.getTradeBalance();
+console.log('Trade Balance:', JSON.stringify(tradeBalance, null, 2));
+```
+
+```typescript getOpenOrders & getLedgersInfo
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// All currently open orders
+const openOrders = await client.getOpenOrders();
+console.log('Open Orders:', openOrders);
+
+// Ledger entries filtered by asset and type
+const ledgers = await client.getLedgersInfo({
+  asset: 'XBT',
+  type: 'deposit',
+});
+console.log('Ledgers:', JSON.stringify(ledgers, null, 2));
+```
+</CodeGroup>
+
+### Order Placement
+
+<CodeGroup>
+```typescript submitOrder — limit
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Limit buy order
+const limitOrder = await client.submitOrder({
+  ordertype: 'limit',
+  type: 'buy',
+  volume: '0.0001',
+  pair: 'XBTUSD',
+  price: '10000',
+  cl_ord_id: client.generateNewOrderID(),
+});
+console.log('Limit Order:', limitOrder);
+```
+
+```typescript submitOrder — market
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Market buy order
+const marketOrder = await client.submitOrder({
+  ordertype: 'market',
+  type: 'buy',
+  volume: '0.01',
+  pair: 'XBTUSD',
+  cl_ord_id: client.generateNewOrderID(),
+});
+console.log('Market Order:', marketOrder);
+```
+
+```typescript submitOrder — post-only
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Post-only limit order (maker-only, GTC)
+const postOnlyOrder = await client.submitOrder({
+  ordertype: 'limit',
+  type: 'buy',
+  volume: '0.001',
+  pair: 'XBTEUR',
+  price: '1000.00',
+  oflags: 'post',       // post-only flag
+  timeinforce: 'GTC',   // Good-til-cancelled
+  cl_ord_id: client.generateNewOrderID(),
+});
+console.log('Post-Only Order:', postOnlyOrder);
+```
+
+```typescript submitBatchOrders
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Batch of 3 orders — all for the same pair
+const batchResult = await client.submitBatchOrders({
+  pair: 'XBTUSD',
+  orders: [
+    {
+      ordertype: 'limit',
+      type: 'buy',
+      volume: '0.0001',
+      price: '10000.00',
+      timeinforce: 'GTC',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+    {
+      ordertype: 'limit',
+      type: 'buy',
+      volume: '0.0001',
+      price: '11111.00',
+      timeinforce: 'GTC',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+    {
+      ordertype: 'limit',
+      type: 'sell',
+      volume: '0.0001',
+      price: '13000.00',
+      timeinforce: 'GTC',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+  ],
+});
+console.log('Batch Result:', JSON.stringify(batchResult, null, 2));
+```
+</CodeGroup>
+
+### Order Management
+
+<CodeGroup>
+```typescript amendOrder & cancelOrder
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Amend an existing order's price (preserves queue priority where possible)
+const amended = await client.amendOrder({
+  txid: 'OXXXXXX-YYYYYY-ZZZZZZ',
+  price: '10500',
+});
+console.log('Amend ID:', amended.result.amend_id);
+
+// Cancel a single order by transaction ID
+const cancelled = await client.cancelOrder({ txid: 'OXXXXXX-YYYYYY-ZZZZZZ' });
+console.log('Cancelled count:', cancelled.result.count);
+```
+
+```typescript cancelAllOrders & Dead Man's Switch
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Cancel every open order immediately
+await client.cancelAllOrders();
+
+// Dead Man's Switch: cancel all orders in 60 seconds unless refreshed
+const dms = await client.cancelAllOrdersAfter({ timeout: 60 });
+console.log('DMS trigger time:', dms.result.triggerTime);
+
+// Reset the countdown (call this every 15-20 seconds to keep orders alive)
+await client.cancelAllOrdersAfter({ timeout: 60 });
+
+// Deactivate the switch
+await client.cancelAllOrdersAfter({ timeout: 0 });
+```
+</CodeGroup>
+
+---
+
+## `generateNewOrderID()`
+
+`SpotClient` exposes a `generateNewOrderID()` helper that returns a 32-character hex string suitable for use as a `cl_ord_id`. Client order IDs let you idempotently track and reference your orders even before Kraken assigns a `txid`.
+
+```typescript
+const orderId = client.generateNewOrderID();
+// e.g. "3f2a1b4c8e9d0f1a2b3c4d5e6f7a8b9c"
+
+await client.submitOrder({
+  ordertype: 'limit',
+  type: 'buy',
+  volume: '0.001',
+  pair: 'XBTUSD',
+  price: '45000',
+  cl_ord_id: orderId,   // reference this ID to cancel/amend later
+});
+```
+
+<Tip>
+  Always generate a fresh `cl_ord_id` per order. Reusing the same ID across orders will result in a rejection.
+</Tip>
+
+---
+
+## Validating Orders Without Execution
+
+Both `submitOrder` and `submitBatchOrders` accept a `validate: true` flag. When set, Kraken validates the order parameters and returns what the response would look like — **without placing the order**. This is useful for integration tests and pre-flight checks.
+
+<Note>
+  When `validate: true` is set, the order **is not submitted** to the matching engine. No funds are reserved, and no `txid` is assigned. Use this in staging environments or when testing new order logic.
+</Note>
+
+```typescript
+const validationResult = await client.submitBatchOrders({
+  pair: 'XBTUSD',
+  validate: true, // dry-run — validate only
+  orders: [
+    {
+      ordertype: 'limit',
+      type: 'buy',
+      volume: '0.0001',
+      price: '45000.00',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+    {
+      ordertype: 'limit',
+      type: 'sell',
+      volume: '0.0001',
+      price: '55000.00',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+  ],
+});
+console.log('Validation Result:', JSON.stringify(validationResult, null, 2));
+```
+
+---
+
+## Further Reading
+
+<CardGroup cols={2}>
+  <Card title="Market Data Reference" href="/reference/spot/market-data">
+    Full parameter documentation for all public endpoints.
+  </Card>
+  <Card title="Account Reference" href="/reference/spot/account">
+    Balance, ledger, position, and trade history endpoint details.
+  </Card>
+  <Card title="Orders Reference" href="/reference/spot/orders">
+    Order types, flags, time-in-force options, and batch constraints.
+  </Card>
+  <Card title="Funding Reference" href="/reference/spot/funding">
+    Deposit, withdrawal, and Earn/staking endpoint details.
+  </Card>
+</CardGroup>

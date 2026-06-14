@@ -1,0 +1,911 @@
+---
+title: "Spot Order Management — SpotClient REST Reference"
+sidebarTitle: "Orders"
+description: "Reference for SpotClient order management methods: submit, amend, cancel single/batch orders, cancel-all, cancel-all-after, and subaccount transfers."
+---
+
+All order management methods are **private endpoints** — they require a valid API key and secret. These methods cover the full order lifecycle: placing single and batch orders, amending open orders, cancelling individual or all orders, and the Dead Man's Switch safety mechanism.
+
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+```
+
+<Note>
+  **API key permissions required:** Orders and trades — Create & modify orders. Use `getAssetPairs()` to look up trading pair constraints (`ordermin`, `costmin`, `tick_size`) before placing orders.
+</Note>
+
+---
+
+## `generateNewOrderID()`
+
+A utility helper that generates a unique 32-character hex string suitable for use as a `cl_ord_id`. Call this before `submitOrder()` to track your orders without depending on the Kraken-assigned `txid`.
+
+**Signature**
+
+```typescript
+generateNewOrderID(): string
+```
+
+<CodeGroup>
+```typescript Generate a Client Order ID
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({ /* ... */ });
+
+const clOrdId = client.generateNewOrderID();
+// e.g. 'a3f1c2d4e5b60789abcdef0123456789'
+
+const order = await client.submitOrder({
+  ordertype: 'limit',
+  type: 'buy',
+  pair: 'XBTUSD',
+  volume: '0.001',
+  price: '50000',
+  cl_ord_id: clOrdId,
+});
+```
+</CodeGroup>
+
+---
+
+## `submitOrder(params)`
+
+Place a new order on the spot exchange. Supports all order types including market, limit, stop-loss, take-profit, and trailing stops.
+
+**Signature**
+
+```typescript
+submitOrder(
+  params: SpotSubmitOrderParams
+): Promise<SpotAPISuccessResponse<SpotSubmitOrderResponse>>
+```
+
+**Required parameters**
+
+<ParamField body="ordertype" type="string" required>
+  Order type. One of:
+  `market`, `limit`, `iceberg`, `stop-loss`, `take-profit`, `stop-loss-limit`, `take-profit-limit`, `trailing-stop`, `trailing-stop-limit`, `settle-position`.
+</ParamField>
+
+<ParamField body="type" type="'buy' | 'sell'" required>
+  Order direction.
+</ParamField>
+
+<ParamField body="volume" type="string" required>
+  Order quantity in base currency (as a string-encoded decimal).
+</ParamField>
+
+<ParamField body="pair" type="string" required>
+  Asset pair to trade (e.g. `"XBTUSD"`).
+</ParamField>
+
+**Optional parameters**
+
+<ParamField body="price" type="string">
+  Limit price for `limit`, `stop-loss-limit`, `take-profit-limit` orders. Stop price for `stop-loss`, `take-profit`, `trailing-stop`, `trailing-stop-limit` orders.
+</ParamField>
+
+<ParamField body="price2" type="string">
+  Secondary price for limit portion of `stop-loss-limit` and `take-profit-limit` orders, or trailing offset for trailing stops.
+</ParamField>
+
+<ParamField body="trigger" type="'index' | 'last'">
+  Price signal to trigger stop orders. Defaults to `last`.
+</ParamField>
+
+<ParamField body="leverage" type="string">
+  Leverage factor for margin orders (e.g. `"2:1"`).
+</ParamField>
+
+<ParamField body="reduce_only" type="boolean">
+  If `true`, only reduces an existing position (no new position opened).
+</ParamField>
+
+<ParamField body="stptype" type="'cancel-newest' | 'cancel-oldest' | 'cancel-both'">
+  Self-trade prevention type.
+</ParamField>
+
+<ParamField body="oflags" type="string">
+  Comma-delimited order flags:
+  - `post` — post-only order (maker only)
+  - `fcib` — prefer fee in base currency
+  - `fciq` — prefer fee in quote currency
+  - `nompp` — no market price protection
+  - `viqc` — volume in quote currency
+</ParamField>
+
+<ParamField body="timeinforce" type="'GTC' | 'IOC' | 'GTD' | 'FOK'">
+  Time-in-force policy. `GTC` = Good-Til-Cancelled, `IOC` = Immediate-Or-Cancel, `GTD` = Good-Til-Date, `FOK` = Fill-Or-Kill.
+</ParamField>
+
+<ParamField body="starttm" type="string">
+  Scheduled start time. `0` for now, `+<n>` for n seconds from now, or Unix timestamp.
+</ParamField>
+
+<ParamField body="expiretm" type="string">
+  Expiration time. Same format as `starttm`.
+</ParamField>
+
+<ParamField body="deadline" type="string">
+  RFC3339 timestamp after which the order should be rejected if not yet placed (max 60 seconds in the future).
+</ParamField>
+
+<ParamField body="cl_ord_id" type="string">
+  Client-defined order ID (max 36 characters). Recommended — use `generateNewOrderID()` to create one.
+</ParamField>
+
+<ParamField body="userref" type="number">
+  Integer user reference ID for grouping orders.
+</ParamField>
+
+<ParamField body="displayvol" type="string">
+  Visible quantity for iceberg orders. Must be less than `volume`.
+</ParamField>
+
+<ParamField body="validate" type="boolean">
+  If `true`, validates the order but does not submit it. Useful for parameter testing.
+</ParamField>
+
+<ParamField body="'close[ordertype]'" type="string">
+  Closing order type to attach (conditional close). E.g. `"limit"`.
+</ParamField>
+
+<ParamField body="'close[price]'" type="string">
+  Closing order price.
+</ParamField>
+
+<ParamField body="'close[price2]'" type="string">
+  Closing order secondary price.
+</ParamField>
+
+<ParamField body="asset_class" type="'tokenized_asset'">
+  Asset class of the pair.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/AddOrder` |
+| **Auth required** | Yes |
+
+**Response shape** — `SpotSubmitOrderResponse`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `descr.order` | `string` | Human-readable order description |
+| `descr.close` | `string?` | Close order description (if attached) |
+| `txid` | `string[]` | Array of transaction IDs assigned by Kraken |
+
+<Tabs>
+  <Tab title="Market Order">
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const order = await client.submitOrder({
+  ordertype: 'market',
+  type: 'buy',
+  volume: '0.01',
+  pair: 'XBTUSD',
+  cl_ord_id: client.generateNewOrderID(),
+});
+
+console.log('Order description:', order.result.descr.order);
+console.log('Transaction IDs:', order.result.txid);
+```
+  </Tab>
+  <Tab title="Limit Order">
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const order = await client.submitOrder({
+  ordertype: 'limit',
+  type: 'buy',
+  volume: '0.001',
+  pair: 'XBTUSD',
+  price: '50000',
+  timeinforce: 'GTC',
+  cl_ord_id: client.generateNewOrderID(),
+});
+
+console.log('Placed limit order:', order.result.txid);
+```
+  </Tab>
+  <Tab title="Post-Only Limit">
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Post-only ensures the order is only ever a maker
+const order = await client.submitOrder({
+  ordertype: 'limit',
+  type: 'buy',
+  volume: '0.001',
+  pair: 'XBTEUR',
+  price: '45000.00',
+  oflags: 'post',
+  timeinforce: 'GTC',
+  cl_ord_id: client.generateNewOrderID(),
+});
+
+console.log('Post-only order:', order.result.txid);
+```
+  </Tab>
+  <Tab title="Validate Only">
+```typescript
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Validate parameters without actually placing the order
+const validation = await client.submitOrder({
+  ordertype: 'limit',
+  type: 'sell',
+  volume: '0.001',
+  pair: 'XBTUSD',
+  price: '99999',
+  validate: true, // dry run
+});
+
+console.log('Validation passed:', validation.result.descr.order);
+```
+  </Tab>
+</Tabs>
+
+---
+
+## `amendOrder(params)`
+
+Amend an existing open order. The order's Kraken transaction ID and client order ID remain unchanged, and queue priority is maintained where possible.
+
+**Signature**
+
+```typescript
+amendOrder(
+  params: SpotAmendOrderParams
+): Promise<SpotAPISuccessResponse<{ amend_id: string }>>
+```
+
+<ParamField body="txid" type="string">
+  Transaction ID of the order to amend. Either `txid` or `cl_ord_id` is required.
+</ParamField>
+
+<ParamField body="cl_ord_id" type="string">
+  Client order ID of the order to amend.
+</ParamField>
+
+<ParamField body="order_qty" type="string">
+  New order quantity (total, not delta).
+</ParamField>
+
+<ParamField body="display_qty" type="string">
+  New display quantity for iceberg orders.
+</ParamField>
+
+<ParamField body="limit_price" type="string">
+  New limit price.
+</ParamField>
+
+<ParamField body="trigger_price" type="string">
+  New trigger/stop price.
+</ParamField>
+
+<ParamField body="pair" type="string">
+  Asset pair (required for some amend operations).
+</ParamField>
+
+<ParamField body="post_only" type="boolean">
+  Update post-only flag.
+</ParamField>
+
+<ParamField body="deadline" type="string">
+  RFC3339 deadline timestamp.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/AmendOrder` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Amend Price
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const result = await client.amendOrder({
+  txid: 'OQCLML-BW3P3-BUCMWZ',
+  limit_price: '48000',
+});
+console.log('Amend ID:', result.result.amend_id);
+```
+
+```typescript Amend Volume by Client ID
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const result = await client.amendOrder({
+  cl_ord_id: 'a3f1c2d4e5b60789abcdef0123456789',
+  order_qty: '0.005',
+  limit_price: '47500',
+});
+console.log('Amended:', result.result.amend_id);
+```
+</CodeGroup>
+
+---
+
+## `cancelOrder(params)`
+
+Cancel a particular open order (or set of open orders) by `txid`, `userref`, or `cl_ord_id`.
+
+**Signature**
+
+```typescript
+cancelOrder(params: {
+  txid?: string | number;
+  cl_ord_id?: string;
+}): Promise<SpotAPISuccessResponse<{ count: number; pending?: boolean }>>
+```
+
+<ParamField body="txid" type="string | number">
+  Transaction ID, user reference ID, or comma-delimited list of transaction IDs to cancel.
+</ParamField>
+
+<ParamField body="cl_ord_id" type="string">
+  Client order ID to cancel.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/CancelOrder` |
+| **Auth required** | Yes |
+
+**Response fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `count` | `number` | Number of orders cancelled |
+| `pending` | `boolean?` | If `true`, a partially filled order is pending cancellation |
+
+<CodeGroup>
+```typescript Cancel by Transaction ID
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const result = await client.cancelOrder({
+  txid: 'OQCLML-BW3P3-BUCMWZ',
+});
+console.log('Cancelled orders:', result.result.count);
+```
+
+```typescript Cancel by Client Order ID
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const result = await client.cancelOrder({
+  cl_ord_id: 'a3f1c2d4e5b60789abcdef0123456789',
+});
+console.log('Cancelled:', result.result.count);
+```
+</CodeGroup>
+
+---
+
+## `cancelAllOrders()`
+
+Cancel all currently open orders. No parameters required.
+
+**Signature**
+
+```typescript
+cancelAllOrders(): Promise<SpotAPISuccessResponse<{ count: number; pending: boolean }>>
+```
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/CancelAll` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Cancel All
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const result = await client.cancelAllOrders();
+console.log('Cancelled:', result.result.count, 'orders');
+```
+</CodeGroup>
+
+---
+
+## `cancelAllOrdersAfter(params)`
+
+**Dead Man's Switch.** Sets a countdown timer that will automatically cancel all client orders if not reset before expiry. Send `timeout: 0` to disable the timer. Designed to protect against network disconnections or system failures.
+
+**Signature**
+
+```typescript
+cancelAllOrdersAfter(params: { timeout: number }): Promise<
+  SpotAPISuccessResponse<{
+    currentTime: string;
+    triggerTime: string;
+  }>
+>
+```
+
+<ParamField body="timeout" type="number" required>
+  Number of seconds until all orders are cancelled. Set to `0` to disable the timer. Maximum: 86400 (24 hours).
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/CancelAllOrdersAfter` |
+| **Auth required** | Yes |
+
+**Response fields**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `currentTime` | `string` | Server time when request was received |
+| `triggerTime` | `string` | Scheduled cancellation time |
+
+<CodeGroup>
+```typescript Set 60-Second Timer
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// Start 60-second countdown
+const dms = await client.cancelAllOrdersAfter({ timeout: 60 });
+console.log('Will cancel at:', dms.result.triggerTime);
+
+// Heartbeat loop — reset every 30s
+setInterval(async () => {
+  await client.cancelAllOrdersAfter({ timeout: 60 });
+}, 30_000);
+
+// Disable when shutting down cleanly
+await client.cancelAllOrdersAfter({ timeout: 0 });
+```
+</CodeGroup>
+
+<Note>
+  You must **continuously reset** the timer before it expires. The timer resets each time you call `cancelAllOrdersAfter()` with a non-zero timeout. If your process crashes, the timer will fire and cancel all orders.
+</Note>
+
+---
+
+## `submitBatchOrders(params)`
+
+Submit a collection of orders (minimum 2, maximum 15) for a single trading pair. Validation is applied to the entire batch before any orders are placed — if one order fails validation, the whole batch is rejected.
+
+**Signature**
+
+```typescript
+submitBatchOrders(params: SpotSubmitOrderBatchParams): Promise<
+  SpotAPISuccessResponse<{ orders: SpotBatchOrderResult[] }>
+>
+```
+
+<ParamField body="pair" type="string" required>
+  Asset pair for all orders in the batch. All orders must share the same pair.
+</ParamField>
+
+<ParamField body="orders" type="SpotBatchOrderItem[]" required>
+  Array of 2–15 order objects. Each item supports the same fields as `submitOrder()` except `pair`.
+</ParamField>
+
+<ParamField body="validate" type="boolean">
+  If `true`, validates the batch but does not submit. Useful for parameter testing.
+</ParamField>
+
+<ParamField body="deadline" type="string">
+  RFC3339 deadline timestamp for the batch.
+</ParamField>
+
+<ParamField body="asset_class" type="'tokenized_asset'">
+  Asset class filter.
+</ParamField>
+
+<ParamField body="broker" type="string">
+  Broker identifier (if applicable).
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/AddOrderBatch` |
+| **Auth required** | Yes |
+
+**Response** — `{ orders: SpotBatchOrderResult[] }`
+
+Each `SpotBatchOrderResult` contains `txid?`, `descr?`, and `error?` (if that specific order failed).
+
+<CodeGroup>
+```typescript Submit a Batch
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const batch = await client.submitBatchOrders({
+  pair: 'XBTUSD',
+  orders: [
+    {
+      ordertype: 'limit',
+      type: 'buy',
+      volume: '0.0001',
+      price: '45000.00',
+      timeinforce: 'GTC',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+    {
+      ordertype: 'limit',
+      type: 'buy',
+      volume: '0.0001',
+      price: '44000.00',
+      timeinforce: 'GTC',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+    {
+      ordertype: 'limit',
+      type: 'sell',
+      volume: '0.0001',
+      price: '55000.00',
+      timeinforce: 'GTC',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+  ],
+});
+
+batch.result.orders.forEach((o, i) => {
+  if (o.error) {
+    console.error(`Order ${i} failed:`, o.error);
+  } else {
+    console.log(`Order ${i} placed:`, o.txid);
+  }
+});
+```
+
+```typescript Validate Batch Only
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const validation = await client.submitBatchOrders({
+  pair: 'XBTUSD',
+  validate: true,
+  orders: [
+    {
+      ordertype: 'limit',
+      type: 'buy',
+      volume: '0.0001',
+      price: '45000.00',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+    {
+      ordertype: 'limit',
+      type: 'sell',
+      volume: '0.0001',
+      price: '55000.00',
+      cl_ord_id: client.generateNewOrderID(),
+    },
+  ],
+});
+console.log('Validation result:', validation.result.orders);
+```
+</CodeGroup>
+
+---
+
+## `cancelBatchOrders(params)`
+
+Cancel multiple open orders by `txid`, `userref`, or `cl_ord_id`. Supports up to **50** unique IDs/references per call.
+
+**Signature**
+
+```typescript
+cancelBatchOrders(params: {
+  orders?: Array<string | number>;
+  cl_ord_ids?: string[];
+}): Promise<SpotAPISuccessResponse<{ count: number }>>
+```
+
+<ParamField body="orders" type="Array<string | number>">
+  Array of transaction IDs or user reference IDs to cancel.
+</ParamField>
+
+<ParamField body="cl_ord_ids" type="string[]">
+  Array of client order IDs to cancel.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/CancelOrderBatch` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Cancel Batch by TxID
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const result = await client.cancelBatchOrders({
+  orders: [
+    'OQCLML-BW3P3-BUCMWZ',
+    'OZNOZE-2DOVH-Q4DOQT',
+  ],
+});
+console.log('Cancelled:', result.result.count);
+```
+
+```typescript Cancel Batch by Client Order IDs
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const result = await client.cancelBatchOrders({
+  cl_ord_ids: [
+    'a3f1c2d4e5b60789abcdef0123456789',
+    'b4e2d3f5a6c70891bcdef0234567890a',
+  ],
+});
+console.log('Cancelled:', result.result.count);
+```
+</CodeGroup>
+
+---
+
+## `createSubaccount(params)`
+
+Create a trading subaccount. Must be called using an API key from the **master account**.
+
+**Signature**
+
+```typescript
+createSubaccount(params: {
+  username: string;
+  email: string;
+}): Promise<SpotAPISuccessResponse<boolean>>
+```
+
+<ParamField body="username" type="string" required>
+  Username for the new subaccount.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Email address for the new subaccount.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/CreateSubaccount` |
+| **Auth required** | Yes (master account API key) |
+
+---
+
+## `submitSubaccountTransfer(params)`
+
+Transfer funds between the master account and subaccounts, or between subaccounts. Must be called using an API key from the **master account**.
+
+**Signature**
+
+```typescript
+submitSubaccountTransfer(
+  params: SpotAccountTransferParams
+): Promise<SpotAPISuccessResponse<SpotAccountTransferResponse>>
+```
+
+<ParamField body="asset" type="string" required>
+  Asset to transfer (e.g. `"EUR"`, `"XBT"`).
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to transfer.
+</ParamField>
+
+<ParamField body="from" type="string" required>
+  Source account UID.
+</ParamField>
+
+<ParamField body="to" type="string" required>
+  Destination account UID.
+</ParamField>
+
+<ParamField body="asset_class" type="'currency' | 'tokenized_asset'">
+  Asset class of the transferred asset.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/AccountTransfer` |
+| **Auth required** | Yes (master account API key) |
+
+**Response fields** — `SpotAccountTransferResponse`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `transfer_id` | `string` | Unique transfer identifier |
+| `status` | `string` | Transfer status |
+
+<CodeGroup>
+```typescript Transfer to Subaccount
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const transfer = await client.submitSubaccountTransfer({
+  asset: 'EUR',
+  amount: '500',
+  from: 'MASTER_ACCOUNT_UID',
+  to: 'SUBACCOUNT_UID',
+});
+console.log('Transfer ID:', transfer.result.transfer_id);
+console.log('Status:', transfer.result.status);
+```
+</CodeGroup>
+
+---
+
+## `submitTransferToFutures(params)`
+
+Transfer funds from a Kraken Spot wallet to a Kraken Futures wallet. Transfers in the opposite direction must be initiated via the Kraken Futures API.
+
+**Signature**
+
+```typescript
+submitTransferToFutures(params: SpotWalletTransferParams): Promise<
+  SpotAPISuccessResponse<{ refid: string }>
+>
+```
+
+<ParamField body="asset" type="string" required>
+  Asset to transfer (e.g. `"EUR"`, `"XBT"`).
+</ParamField>
+
+<ParamField body="from" type="'Spot Wallet'" required>
+  Must be `"Spot Wallet"`.
+</ParamField>
+
+<ParamField body="to" type="'Futures Wallet'" required>
+  Must be `"Futures Wallet"`.
+</ParamField>
+
+<ParamField body="amount" type="string" required>
+  Amount to transfer.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/WalletTransfer` |
+| **Auth required** | Yes |
+
+<CodeGroup>
+```typescript Transfer EUR to Futures
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const transfer = await client.submitTransferToFutures({
+  asset: 'EUR',
+  from: 'Spot Wallet',
+  to: 'Futures Wallet',
+  amount: '500',
+});
+console.log('Reference ID:', transfer.result.refid);
+```
+</CodeGroup>
+
+---
+
+## Full Order Lifecycle Example
+
+The following example shows a complete order cycle — place a limit order, verify it appears in open orders, then cancel it.
+
+<CodeGroup>
+```typescript Order Lifecycle
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+// 1. Generate a unique client order ID
+const clOrdId = client.generateNewOrderID();
+
+// 2. Place a limit order (well below market to avoid fill)
+const submitted = await client.submitOrder({
+  ordertype: 'limit',
+  type: 'buy',
+  volume: '0.001',
+  pair: 'XBTUSD',
+  price: '10000',
+  timeinforce: 'GTC',
+  cl_ord_id: clOrdId,
+});
+const txid = submitted.result.txid[0];
+console.log('Order placed, txid:', txid);
+
+// 3. Confirm it appears in open orders
+const openOrders = await client.getOpenOrders({ cl_ord_id: clOrdId });
+console.log('Open order status:', openOrders.result.open[txid]?.status);
+
+// 4. Cancel the order
+const cancelResult = await client.cancelOrder({ txid });
+console.log('Cancelled:', cancelResult.result.count, 'order(s)');
+
+// 5. Verify it's now closed
+const closedOrders = await client.getOrders({ txid, trades: false });
+console.log('Final status:', closedOrders.result[txid]?.status);
+```
+</CodeGroup>

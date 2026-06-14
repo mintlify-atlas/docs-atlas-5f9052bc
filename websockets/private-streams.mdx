@@ -1,0 +1,325 @@
+---
+title: "Subscribe to Kraken Private WebSocket Account Streams"
+sidebarTitle: "Private Streams"
+description: "Stream live Kraken account data — order executions, balances, open positions, and fills — over authenticated WebSocket connections for Spot and Futures."
+---
+
+Private streams deliver real-time account state changes: order fills, status transitions, balance updates, and open positions. They require valid API keys. The SDK handles every authentication detail automatically — token fetching, caching, challenge signing, and re-authentication after reconnects — so you only need to call `subscribe()`.
+
+## Authentication flow
+
+<Note>
+  You do **not** need to manually fetch WebSocket tokens or inject authentication parameters into your subscription payloads. The SDK does this for you automatically based on the keys you provided at construction time.
+</Note>
+
+The authentication mechanism differs by market:
+
+- **Spot private** (`spotPrivateV2`, `spotL3V2`, `spotBetaPrivateV2`): The SDK calls the REST API to fetch a short-lived WebSocket token and injects `token` into each subscription request. The token is cached and refreshed transparently.
+- **Derivatives private** (`derivativesPrivateV1`): On connect, the SDK sends a `challenge` event with your API key. The server responds with a challenge string, which the SDK hashes with SHA-256 and signs with SHA-512 using your API secret. The signed challenge is then included automatically in every private subscription request.
+
+---
+
+## Spot private topics
+
+Spot private streams connect via `WS_KEY_MAP.spotPrivateV2` (`wss://ws-auth.kraken.com/v2`). The one exception is the Level 3 order book, which uses `WS_KEY_MAP.spotL3V2` (`wss://ws-l3.kraken.com/v2`).
+
+### Setup
+
+```typescript
+import { WebsocketClient, WS_KEY_MAP } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+ws.on('open', (data) => {
+  console.log('connected:', data.wsKey);
+});
+
+ws.on('authenticated', (data) => {
+  // Private connection auth handshake completed
+  console.log('authenticated:', data.wsKey);
+});
+
+ws.on('message', (data) => {
+  console.log('data received:', JSON.stringify(data));
+});
+
+ws.on('response', (data) => {
+  console.log('server reply:', JSON.stringify(data));
+});
+
+ws.on('reconnecting', (data) => {
+  console.warn('reconnecting — pause order activity:', data.wsKey);
+});
+
+ws.on('reconnected', (data) => {
+  // Reconcile account state via REST API here
+  console.log('reconnected:', data.wsKey);
+});
+
+ws.on('exception', (data) => {
+  console.error('exception:', data);
+});
+```
+
+<Tabs>
+  <Tab title="executions">
+    The `executions` topic delivers order fills and status changes in real time. It is the primary feed for tracking order lifecycle events.
+
+    ```typescript
+    import { WSTopicRequest } from '@siebly/kraken-api';
+    import { WSSpotTopic } from '@siebly/kraken-api';
+
+    const executionsRequest: WSTopicRequest<WSSpotTopic> = {
+      topic: 'executions',
+      payload: {
+        snap_trades: true,   // Send a snapshot of recent trades on connect — default: false
+        snap_orders: true,   // Send a snapshot of open orders on connect — default: true
+        order_status: true,  // Include order status in updates — default: true
+        ratecounter: true,   // Include rate counter info — default: false
+        // users: 'all',     // Filter by user (sub-account scenarios)
+      },
+    };
+
+    ws.subscribe(executionsRequest, WS_KEY_MAP.spotPrivateV2);
+    ```
+  </Tab>
+  <Tab title="balances">
+    The `balances` topic streams account balance updates as they change, including a full snapshot on connect.
+
+    ```typescript
+    import { WSTopicRequest } from '@siebly/kraken-api';
+    import { WSSpotTopic } from '@siebly/kraken-api';
+
+    const balancesRequest: WSTopicRequest<WSSpotTopic> = {
+      topic: 'balances',
+      payload: {
+        // snapshot: true, // default: true — send balance snapshot on connect
+        // rebased: true,  // default: true — rebase balances to reference currency
+      },
+    };
+
+    ws.subscribe(balancesRequest, WS_KEY_MAP.spotPrivateV2);
+    ```
+  </Tab>
+  <Tab title="level3">
+    The Level 3 order book (`level3`) provides individual order-level depth data. It uses a **dedicated endpoint** and therefore requires `WS_KEY_MAP.spotL3V2` instead of `spotPrivateV2`.
+
+    ```typescript
+    import { WSTopicRequest } from '@siebly/kraken-api';
+    import { WSSpotTopic } from '@siebly/kraken-api';
+
+    const level3Request: WSTopicRequest<WSSpotTopic> = {
+      topic: 'level3',
+      payload: {
+        symbol: ['BTC/USD', 'ETH/USD'],
+        // depth: 10, // default: 10 — Possible values: 10, 100, 1000
+        // snapshot: true, // default: true
+      },
+    };
+
+    // NOTE: Level 3 uses spotL3V2, not spotPrivateV2
+    ws.subscribe(level3Request, WS_KEY_MAP.spotL3V2);
+    ```
+
+    <Warning>
+      Using `WS_KEY_MAP.spotPrivateV2` for the `level3` topic will result in an error. Always use `WS_KEY_MAP.spotL3V2` for Level 3 subscriptions.
+    </Warning>
+  </Tab>
+</Tabs>
+
+### Complete Spot private example
+
+```typescript
+import {
+  WebsocketClient,
+  WS_KEY_MAP,
+  WSTopicRequest,
+} from '@siebly/kraken-api';
+import { WSSpotTopic } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient({
+  apiKey: process.env.API_SPOT_KEY!,
+  apiSecret: process.env.API_SPOT_SECRET!,
+});
+
+ws.on('open', (data) => console.log('connected:', data.wsKey));
+ws.on('authenticated', (data) => console.log('authenticated:', data.wsKey));
+ws.on('message', (data) => console.log('message:', JSON.stringify(data)));
+ws.on('response', (data) => console.log('response:', JSON.stringify(data)));
+ws.on('reconnecting', (data) => console.warn('reconnecting:', data.wsKey));
+ws.on('reconnected', (data) => console.log('reconnected:', data.wsKey));
+ws.on('exception', (data) => console.error('exception:', data));
+
+// Order executions and fills
+ws.subscribe(
+  {
+    topic: 'executions',
+    payload: {
+      snap_trades: true,
+      snap_orders: true,
+      order_status: true,
+      ratecounter: true,
+    },
+  } as WSTopicRequest<WSSpotTopic>,
+  WS_KEY_MAP.spotPrivateV2,
+);
+
+// Account balances
+ws.subscribe(
+  { topic: 'balances' } as WSTopicRequest<WSSpotTopic>,
+  WS_KEY_MAP.spotPrivateV2,
+);
+
+// Level 3 order book (dedicated L3 endpoint)
+ws.subscribe(
+  {
+    topic: 'level3',
+    payload: { symbol: ['BTC/USD'] },
+  } as WSTopicRequest<WSSpotTopic>,
+  WS_KEY_MAP.spotL3V2,
+);
+```
+
+---
+
+## Futures private topics
+
+Futures private streams use `WS_KEY_MAP.derivativesPrivateV1` and connect to `wss://futures.kraken.com/ws/v1`. Authentication is challenge-based and fully automated by the SDK.
+
+<Tabs>
+  <Tab title="open_orders">
+    Stream real-time updates whenever an open order changes state (placed, filled, cancelled, amended).
+
+    ```typescript
+    // Simple string topic (no parameters needed)
+    ws.subscribe('open_orders', WS_KEY_MAP.derivativesPrivateV1);
+
+    // Or as a typed object
+    ws.subscribe(
+      { topic: 'open_orders' },
+      WS_KEY_MAP.derivativesPrivateV1,
+    );
+
+    // Verbose variant — includes full order detail on every update
+    ws.subscribe('open_orders_verbose', WS_KEY_MAP.derivativesPrivateV1);
+    ```
+  </Tab>
+  <Tab title="fills">
+    Receive trade fill events as they occur on your Futures account.
+
+    ```typescript
+    ws.subscribe(
+      {
+        topic: 'fills',
+        // Optionally filter to a specific product:
+        // payload: { product_ids: ['PF_XBTUSD'] },
+      },
+      WS_KEY_MAP.derivativesPrivateV1,
+    );
+    ```
+  </Tab>
+  <Tab title="balances">
+    Stream account balance updates across all collateral currencies.
+
+    ```typescript
+    ws.subscribe('balances', WS_KEY_MAP.derivativesPrivateV1);
+    ```
+  </Tab>
+  <Tab title="open_positions">
+    Receive updates whenever your open futures positions change.
+
+    ```typescript
+    ws.subscribe('open_positions', WS_KEY_MAP.derivativesPrivateV1);
+    ```
+  </Tab>
+  <Tab title="account_log & notifications">
+    Stream account log entries and authenticated notifications.
+
+    ```typescript
+    // Account log — all account-level events
+    ws.subscribe('account_log', WS_KEY_MAP.derivativesPrivateV1);
+
+    // Authenticated notifications
+    ws.subscribe('notifications_auth', WS_KEY_MAP.derivativesPrivateV1);
+    ```
+  </Tab>
+</Tabs>
+
+### Complete Futures private example
+
+```typescript
+import {
+  WebsocketClient,
+  WS_KEY_MAP,
+  WSTopicRequest,
+} from '@siebly/kraken-api';
+import { WSDerivativesTopic } from '@siebly/kraken-api';
+
+const ws = new WebsocketClient({
+  apiKey: process.env.API_FUTURES_KEY!,
+  apiSecret: process.env.API_FUTURES_SECRET!,
+});
+
+ws.on('open', (data) => console.log('connected:', data.wsKey));
+ws.on('authenticated', (data) => console.log('authenticated:', data.wsKey));
+ws.on('message', (data) => console.log('message:', JSON.stringify(data)));
+ws.on('response', (data) => console.log('response:', JSON.stringify(data)));
+ws.on('reconnecting', (data) => console.warn('reconnecting:', data.wsKey));
+ws.on('reconnected', (data) => console.log('reconnected:', data.wsKey));
+ws.on('exception', (data) => console.error('exception:', data));
+
+// Open orders — standard and verbose variants
+ws.subscribe('open_orders', WS_KEY_MAP.derivativesPrivateV1);
+ws.subscribe('open_orders_verbose', WS_KEY_MAP.derivativesPrivateV1);
+
+// Trade fills
+ws.subscribe(
+  { topic: 'fills' } as WSTopicRequest<WSDerivativesTopic>,
+  WS_KEY_MAP.derivativesPrivateV1,
+);
+
+// Account balances
+ws.subscribe('balances', WS_KEY_MAP.derivativesPrivateV1);
+
+// Open positions
+ws.subscribe('open_positions', WS_KEY_MAP.derivativesPrivateV1);
+
+// Account log and notifications
+ws.subscribe('account_log', WS_KEY_MAP.derivativesPrivateV1);
+ws.subscribe('notifications_auth', WS_KEY_MAP.derivativesPrivateV1);
+```
+
+---
+
+## After reconnection
+
+<Tip>
+  The `reconnected` event signals that the SDK has successfully re-established the connection, re-authenticated, and resubscribed to all topics. This is the correct moment to call the REST API to reconcile any account state changes that occurred while the WebSocket was down — for example, re-querying open orders or current balances.
+</Tip>
+
+```typescript
+ws.on('reconnected', async (data) => {
+  console.log('reconnected on', data.wsKey, '— reconciling state...');
+
+  // Example: re-query open orders after reconnect
+  // const openOrders = await spotClient.getOpenOrders();
+  // rebuildLocalOrderBook(openOrders);
+});
+```
+
+---
+
+## Futures private topics reference
+
+| Topic | Description |
+|---|---|
+| `open_orders` | Open order state changes |
+| `open_orders_verbose` | Open order state changes with full order detail |
+| `fills` | Trade fill events |
+| `balances` | Account balance updates |
+| `open_positions` | Open position updates |
+| `account_log` | Full account activity log |
+| `notifications_auth` | Authenticated system notifications |
