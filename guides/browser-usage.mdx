@@ -1,7 +1,7 @@
 ---
 title: "Use the Kraken API SDK in Browser and Frontend Projects"
 sidebarTitle: "Browser Usage"
-description: "Bundle @siebly/kraken-api for browser environments using webpack. The SDK uses the Web Crypto API for HMAC signing, making it compatible with modern browsers."
+description: "Bundle @siebly/kraken-api for browsers using webpack. The SDK uses the Web Crypto API for HMAC signing, making it compatible with modern browsers."
 ---
 
 The `@siebly/kraken-api` SDK is not limited to Node.js. It is designed to work in modern browser environments as well, making it suitable for frontend dashboards, price widgets, and other client-side applications that need to consume Kraken market data. The key design decision that makes this possible is the SDK's use of the browser-native **Web Crypto API** for HMAC signing rather than Node's `crypto` module, which means no native bindings or Node-specific polyfills are needed for the signing path.

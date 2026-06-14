@@ -103,11 +103,12 @@ submitOrder(
 </ParamField>
 
 <ParamField body="reduce_only" type="boolean">
-  If `true`, only reduces an existing position (no new position opened).
+  If `true`, the order only reduces an existing margin position and never opens a new one.
 </ParamField>
 
 <ParamField body="stptype" type="'cancel-newest' | 'cancel-oldest' | 'cancel-both'">
-  Self-trade prevention type.
+  Self-trade prevention behaviour when both sides of a trade would belong to the same account.
+  `cancel-newest` cancels the incoming order; `cancel-oldest` cancels the resting order; `cancel-both` cancels both.
 </ParamField>
 
 <ParamField body="oflags" type="string">
@@ -807,61 +808,6 @@ const transfer = await client.submitSubaccountTransfer({
 });
 console.log('Transfer ID:', transfer.result.transfer_id);
 console.log('Status:', transfer.result.status);
-```
-</CodeGroup>
-
----
-
-## `submitTransferToFutures(params)`
-
-Transfer funds from a Kraken Spot wallet to a Kraken Futures wallet. Transfers in the opposite direction must be initiated via the Kraken Futures API.
-
-**Signature**
-
-```typescript
-submitTransferToFutures(params: SpotWalletTransferParams): Promise<
-  SpotAPISuccessResponse<{ refid: string }>
->
-```
-
-<ParamField body="asset" type="string" required>
-  Asset to transfer (e.g. `"EUR"`, `"XBT"`).
-</ParamField>
-
-<ParamField body="from" type="'Spot Wallet'" required>
-  Must be `"Spot Wallet"`.
-</ParamField>
-
-<ParamField body="to" type="'Futures Wallet'" required>
-  Must be `"Futures Wallet"`.
-</ParamField>
-
-<ParamField body="amount" type="string" required>
-  Amount to transfer.
-</ParamField>
-
-| Property | Value |
-|----------|-------|
-| **HTTP method** | `POST` |
-| **Endpoint** | `0/private/WalletTransfer` |
-| **Auth required** | Yes |
-
-<CodeGroup>
-```typescript Transfer EUR to Futures
-import { SpotClient } from '@siebly/kraken-api';
-
-const client = new SpotClient({
-  apiKey: process.env.API_SPOT_KEY,
-  apiSecret: process.env.API_SPOT_SECRET,
-});
-
-const transfer = await client.submitTransferToFutures({
-  asset: 'EUR',
-  from: 'Spot Wallet',
-  to: 'Futures Wallet',
-  amount: '500',
-});
-console.log('Reference ID:', transfer.result.refid);
 ```
 </CodeGroup>
 

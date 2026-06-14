@@ -1,7 +1,7 @@
 ---
 title: "InstitutionalClient: OTC and Custody API for Kraken"
 sidebarTitle: "Institutional Client"
-description: "InstitutionalClient provides access to Kraken's OTC trading desk and custody APIs — quote management, vault operations, and transaction history for institutional accounts."
+description: "InstitutionalClient covers Kraken's OTC trading desk and custody APIs — quote management, vault operations, and transaction history for institutions."
 ---
 
 `InstitutionalClient` is the gateway to Kraken's institutional-grade services: the [OTC trading desk](https://docs.kraken.com/api/docs/otc-api) and the [custody platform](https://docs.kraken.com/api/docs/custody-api). It is designed for hedge funds, asset managers, family offices, and corporate treasuries that require direct quote negotiation, segregated custody vaults, and auditability through structured task and activity logs. Requests are routed to `https://api.kraken.com`.
@@ -24,6 +24,17 @@ const client = new InstitutionalClient({
 ```
 
 All `InstitutionalClient` methods are authenticated. There are no public endpoints on this client.
+
+---
+
+## `generateNewOrderID()`
+
+`InstitutionalClient` exposes a `generateNewOrderID()` helper that returns a cryptographically random 32-character string using `nanoid`. This is useful when you need to generate a unique client-side order or reference identifier for OTC quote requests.
+
+```typescript
+const refId = client.generateNewOrderID();
+// e.g. "K3mPdL0oEuJhsYgCbWiAe8fV_Rq2Kz7X"
+```
 
 ---
 

@@ -126,6 +126,50 @@ for (const [asset, detail] of Object.entries(extended.result)) {
 
 ---
 
+## `getCreditLines(params?)`
+
+Retrieve all credit line details for VIPs with this functionality.
+
+**Signature**
+
+```typescript
+getCreditLines(params?: {
+  rebase_multiplier?: 'rebased' | 'base';
+}): Promise<SpotAPISuccessResponse<SpotCreditLines | null>>
+```
+
+<ParamField body="rebase_multiplier" type="'rebased' | 'base'">
+  Controls how multi-collateral balances are reported.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `0/private/CreditLines` |
+| **Auth required** | Yes |
+
+Returns `null` if no credit lines are available on the account.
+
+<CodeGroup>
+```typescript Get Credit Lines
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient({
+  apiKey: process.env.API_SPOT_KEY,
+  apiSecret: process.env.API_SPOT_SECRET,
+});
+
+const creditLines = await client.getCreditLines();
+if (creditLines.result) {
+  console.log(creditLines.result);
+} else {
+  console.log('No credit lines available.');
+}
+```
+</CodeGroup>
+
+---
+
 ## `getTradeBalance(params?)`
 
 Retrieve a summary of collateral balances, margin position valuations, equity and margin level.
@@ -1012,3 +1056,139 @@ console.log('WS Token:', token);
 console.log('Expires in:', wsAuth.result.expires, 'seconds');
 ```
 </CodeGroup>
+
+---
+
+## OAuth Methods
+
+The following OAuth methods allow programmatic management of OAuth2 access tokens and Fast API keys. These are used in OAuth2-based integrations where users authorize access via Kraken's OAuth flow. See `reference/spot/funding.mdx` for full parameter details and usage examples.
+
+### `getOAuthAccessToken(params)`
+
+Retrieve an OAuth2 access token using an authorization code or refresh token flow.
+
+**Signature**
+
+```typescript
+getOAuthAccessToken(
+  params: OauthGetAccessTokenParams
+): Promise<OauthGetAccessTokenResponse>
+```
+
+<ParamField body="grant_type" type="'authorization_code' | 'refresh_token'" required>
+  OAuth2 grant type.
+</ParamField>
+
+<ParamField body="code" type="string">
+  Authorization code. Required when `grant_type` is `authorization_code`.
+</ParamField>
+
+<ParamField body="redirect_uri" type="string">
+  Redirect URI. Required when `grant_type` is `authorization_code`.
+</ParamField>
+
+<ParamField body="refresh_token" type="string">
+  Refresh token. Required when `grant_type` is `refresh_token`.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `oauth/token` |
+| **Auth required** | Basic auth (base64-encoded client credentials) |
+
+---
+
+### `getOAuthUserInfo()`
+
+Returns the email address and IBAN of the authenticated user. Requires OAuth2 Bearer token with scope `account.info:basic`.
+
+**Signature**
+
+```typescript
+getOAuthUserInfo(): Promise<OauthGetUserInfoResponse>
+```
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `oauth/userinfo` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+---
+
+### `createOAuthFastApiKey(params)`
+
+Creates a Fast API key with specified permissions and IP allowlist. Requires OAuth2 Bearer token with scope `account.fast-api-key:write`.
+
+**Signature**
+
+```typescript
+createOAuthFastApiKey(
+  params: OauthCreateFastApiKeyParams
+): Promise<OauthCreateFastApiKeyResponse>
+```
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `POST` |
+| **Endpoint** | `oauth/fast-api-key` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+---
+
+### `listOAuthFastApiKeys()`
+
+List all Fast API keys associated with the OAuth client. Requires OAuth2 Bearer token with scope `account.fast-api-key:read`.
+
+**Signature**
+
+```typescript
+listOAuthFastApiKeys(): Promise<{ result: OauthFastApiKey[] }>
+```
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `oauth/fast-api-keys` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+---
+
+### `updateOAuthFastApiKey(params)`
+
+Updates an existing Fast API key. Requires OAuth2 Bearer token with scope `account.fast-api-key:write`.
+
+**Signature**
+
+```typescript
+updateOAuthFastApiKey(params: OauthUpdateFastApiKeyParams): Promise<{ result: boolean }>
+```
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `PUT` |
+| **Endpoint** | `oauth/fast-api-key` |
+| **Auth required** | Yes (OAuth2 Bearer) |
+
+---
+
+### `deleteOAuthFastApiKey(params)`
+
+Deletes a Fast API key. Requires OAuth2 Bearer token with scope `account.fast-api-key:write`.
+
+**Signature**
+
+```typescript
+deleteOAuthFastApiKey(params: { api_key_name: string }): Promise<{ result: boolean }>
+```
+
+<ParamField body="api_key_name" type="string" required>
+  Name of the key to delete (max 32 characters).
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `DELETE` |
+| **Endpoint** | `oauth/fast-api-key` |
+| **Auth required** | Yes (OAuth2 Bearer) |

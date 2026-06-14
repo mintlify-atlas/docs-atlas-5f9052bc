@@ -1,7 +1,7 @@
 ---
-title: "Low-Latency Spot Trading with WebsocketAPIClient"
+title: "Kraken Spot Trading via WebsocketAPIClient (WS API)"
 sidebarTitle: "WS API Client"
-description: "Use WebsocketAPIClient to send and await Spot order management commands over a persistent WebSocket connection, with the convenience of promise-based async/await."
+description: "Use WebsocketAPIClient to place and manage Spot orders over a persistent WebSocket connection using promise-based async/await — lower latency than REST."
 ---
 
 `WebsocketAPIClient` is a thin, ergonomic wrapper around `WebsocketClient` that exposes Kraken's Spot WebSocket API as a set of awaitable async methods. Instead of opening a new HTTP connection for every order operation, `WebsocketAPIClient` maintains a single persistent authenticated WebSocket connection and routes each command through it — returning a resolved promise when the server replies.

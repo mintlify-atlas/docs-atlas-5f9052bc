@@ -1,7 +1,7 @@
 ---
-title: "WebSocket Integration with the Kraken SDK"
+title: "Kraken API SDK WebSocket Client: Integration Overview"
 sidebarTitle: "Overview"
-description: "Learn how the Kraken SDK's WebsocketClient manages connections, authentication, heartbeats, automatic reconnection, and resubscription across all Kraken markets."
+description: "Learn how WebsocketClient manages connections, authentication, heartbeats, reconnection, and resubscription across all Kraken Spot and Futures markets."
 ---
 
 The `@siebly/kraken-api` SDK ships two distinct WebSocket interfaces that cover every real-time use case on Kraken: a general-purpose streaming client for market data and account updates, and a command-oriented client for low-latency Spot order management over a persistent connection. Both share the same underlying connection lifecycle machinery — heartbeats, reconnect, re-authentication, and resubscription are all handled automatically.

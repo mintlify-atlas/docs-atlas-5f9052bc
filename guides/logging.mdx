@@ -1,7 +1,7 @@
 ---
-title: "Customise SDK Logging for Kraken API Integration"
+title: "Customise Logging for the @siebly/kraken-api Node.js SDK"
 sidebarTitle: "Logging"
-description: "Inject a custom logger into WebsocketClient or SpotClient to integrate Kraken SDK logs with your application's logging stack, including trace, info, and error levels."
+description: "Inject a custom logger into WebsocketClient to route Kraken SDK logs through your application's logging stack with trace, info, and error level support."
 ---
 
 The `@siebly/kraken-api` SDK ships with a built-in default logger that writes `info` and `error` messages to the console and silently discards `trace`-level output. For most development work this is fine, but in production you will almost certainly want SDK logs flowing into the same structured logging pipeline as the rest of your application — whether that is `pino`, `winston`, a cloud logging service, or something else entirely. The SDK makes this straightforward: pass any object that satisfies the `DefaultLogger` interface as the second argument to `WebsocketClient`, and the SDK will route all internal log calls through it.

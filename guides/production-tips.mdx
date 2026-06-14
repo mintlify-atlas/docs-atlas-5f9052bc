@@ -1,7 +1,7 @@
 ---
 title: "Production Deployment Tips for Kraken API Integrations"
 sidebarTitle: "Production Tips"
-description: "Best practices for running @siebly/kraken-api in production: client-side order IDs, reconnect handling, symbol conventions, credential security, and rollout strategy."
+description: "Best practices for running @siebly/kraken-api in production: client-side order IDs, reconnect handling, symbol conventions, and credential security."
 ---
 
 Moving from a working integration to a production-grade one involves a handful of deliberate choices that pay compounding dividends over time. The patterns below reflect what matters most when your code is running live, where a silent assumption or a poorly handled reconnect can translate directly into missed fills, duplicate orders, or exposure you didn't intend. Work through them before your first live trade.

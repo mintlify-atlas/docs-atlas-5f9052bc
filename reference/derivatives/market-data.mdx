@@ -1,7 +1,7 @@
 ---
-title: "Derivatives Market Data Methods — DerivativesClient Reference"
+title: "Derivatives Market Data — DerivativesClient Reference"
 sidebarTitle: "Market Data"
-description: "Reference for all DerivativesClient public market data methods: instruments, tickers, order books, candles, fee schedules, funding rates, and execution events."
+description: "Reference for DerivativesClient public market data: instruments, tickers, order books, candles, fee schedules, historical funding rates, and market events."
 ---
 
 The `DerivativesClient` exposes a full suite of **public market data** methods for the Kraken Futures (Derivatives) API. None of the methods on this page require API key authentication — you can instantiate the client without credentials and call them freely. They cover instrument specifications, real-time ticker snapshots, full order-book depth, OHLCV candles, historical funding rates, fee schedules, and streaming-style market event history.
@@ -11,6 +11,48 @@ import { DerivativesClient } from '@siebly/kraken-api';
 
 // No API keys needed for public data
 const client = new DerivativesClient();
+```
+
+---
+
+## Trade History
+
+### `getTradeHistory(params)`
+
+Returns the most recent 100 trades prior to the specified `lastTime` value, up to the past 7 days or the most recent trading engine restart — whichever is sooner. If no `lastTime` is provided, the 100 most recent trades are returned.
+
+- **HTTP method:** `GET`
+- **Endpoint:** `derivatives/api/v3/history`
+- **Auth required:** No
+
+<ParamField query="symbol" type="string" required>
+  The futures contract symbol to query, e.g. `PF_BTCUSD`.
+</ParamField>
+
+<ParamField query="lastTime" type="string">
+  ISO 8601 timestamp. Returns the 100 most recent trades **before** this time. Omit to get the 100 most recent trades overall.
+</ParamField>
+
+**Returns:** `Promise<DerivativesAPISuccessResponse<{ history: FuturesTradeHistoryItem[] }>>`
+
+Each `FuturesTradeHistoryItem` includes:
+- `uid` — unique trade identifier
+- `price` — the fill price as a string
+- `size` — the fill size as a number
+- `side` — `buy` or `sell`
+- `time` — ISO 8601 timestamp of the trade
+- `type` — trade type, e.g. `fill`
+
+```typescript
+import { DerivativesClient } from '@siebly/kraken-api';
+
+const client = new DerivativesClient();
+
+const response = await client.getTradeHistory({ symbol: 'PF_BTCUSD' });
+
+for (const trade of response.history) {
+  console.log(trade.time, trade.side, trade.size, '@', trade.price);
+}
 ```
 
 ---

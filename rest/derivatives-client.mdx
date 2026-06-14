@@ -1,7 +1,7 @@
 ---
 title: "DerivativesClient: Kraken Futures REST API Methods"
 sidebarTitle: "Derivatives Client"
-description: "DerivativesClient covers all Kraken Futures REST endpoints for perpetual and fixed-maturity contracts, including market data, order management, and account state."
+description: "DerivativesClient covers Kraken Futures REST endpoints for perpetual and fixed-maturity contracts — market data, order management, and account state."
 ---
 
 `DerivativesClient` provides full access to the [Kraken Futures REST API](https://docs.kraken.com/api/docs/guides/futures-introduction). It covers all perpetual and fixed-maturity contract markets — market data, order book snapshots, candles, open positions, fill history, account state, leverage settings, batch order management, and transfers between Futures and Spot wallets. All live requests are routed to `https://futures.kraken.com`.
@@ -62,6 +62,30 @@ Kraken Futures symbols follow a structured prefix convention that identifies the
 | `IN_` | Index | `IN_XBTUSD` |
 
 Use `getInstruments()` to fetch the full list of currently listed symbols with their specifications.
+
+---
+
+## `generateNewOrderID()`
+
+`DerivativesClient` exposes a `generateNewOrderID()` helper that returns a cryptographically random 32-character string using `nanoid`. Use this to generate a unique `cliOrdId` for each order you submit. Client order IDs let you idempotently track and reference your orders even before Kraken assigns an internal order ID.
+
+```typescript
+const orderId = client.generateNewOrderID();
+// e.g. "V_Rq2Kz7Xn1mPdL0oEuJhsYgCbWiAe8f"
+
+await client.submitOrder({
+  orderType: 'lmt',
+  symbol: 'PF_BTCUSD',
+  side: 'buy',
+  size: 0.01,
+  limitPrice: 30000,
+  cliOrdId: orderId,
+});
+```
+
+<Tip>
+  Always generate a fresh `cliOrdId` per order. Reusing the same ID across orders will result in a rejection.
+</Tip>
 
 ---
 

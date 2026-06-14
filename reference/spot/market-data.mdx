@@ -15,6 +15,47 @@ const client = new SpotClient();
 
 ---
 
+## `getServerTime()`
+
+Get the current server time.
+
+**Signature**
+
+```typescript
+getServerTime(): Promise<SpotAPISuccessResponse<{ unixtime: number; rfc1123: string }>>
+```
+
+<ParamField path="—" type="none">
+  This method takes no parameters.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/Time` |
+| **Auth required** | No |
+
+**Response shape**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `unixtime` | `number` | Current Unix timestamp (seconds) |
+| `rfc1123` | `string` | Current time in RFC 1123 format |
+
+<CodeGroup>
+```typescript Get Server Time
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const time = await client.getServerTime();
+console.log('Unix time:', time.result.unixtime);
+console.log('RFC 1123:', time.result.rfc1123);
+```
+</CodeGroup>
+
+---
+
 ## `getSystemStatus()`
 
 Get the current system status or trading mode.
@@ -578,3 +619,88 @@ console.log('Last timestamp:', spreads.result.last);
 <Tip>
   Store the `last` timestamp from each response and pass it as `since` in your next call to receive only new spread entries — ideal for efficient polling.
 </Tip>
+
+---
+
+## `getPreTradeData(params)`
+
+Returns the top 10 price levels in the order book with aggregated order quantities at each level, for a given trading pair. This is a public transparency endpoint with no authentication required.
+
+**Signature**
+
+```typescript
+getPreTradeData(params: {
+  symbol: string;
+}): Promise<SpotAPISuccessResponse<SpotPreTradeData>>
+```
+
+<ParamField query="symbol" type="string" required>
+  Trading pair symbol to retrieve pre-trade data for (e.g. `"XBTUSD"`).
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/PreTrade` |
+| **Auth required** | No |
+
+<CodeGroup>
+```typescript Get Pre-Trade Data
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const preTrade = await client.getPreTradeData({ symbol: 'XBTUSD' });
+console.log(preTrade.result);
+```
+</CodeGroup>
+
+---
+
+## `getPostTradeData(params?)`
+
+Returns a list of recent trades on the spot exchange. If no filter parameters are specified, the last 1000 trades for all pairs are returned. This is a public transparency endpoint with no authentication required.
+
+**Signature**
+
+```typescript
+getPostTradeData(
+  params?: SpotGetPostTradeDataParams
+): Promise<SpotAPISuccessResponse<SpotPostTradeDataResponse>>
+```
+
+<ParamField query="symbol" type="string">
+  Filter trades by trading pair symbol (e.g. `"XBTUSD"`).
+</ParamField>
+
+<ParamField query="from_ts" type="string">
+  ISO 8601 timestamp — return trades on or after this time.
+</ParamField>
+
+<ParamField query="to_ts" type="string">
+  ISO 8601 timestamp — return trades on or before this time.
+</ParamField>
+
+<ParamField query="count" type="number">
+  Maximum number of trades to return. Defaults to 1000.
+</ParamField>
+
+| Property | Value |
+|----------|-------|
+| **HTTP method** | `GET` |
+| **Endpoint** | `0/public/PostTrade` |
+| **Auth required** | No |
+
+<CodeGroup>
+```typescript Get Post-Trade Data
+import { SpotClient } from '@siebly/kraken-api';
+
+const client = new SpotClient();
+
+const postTrade = await client.getPostTradeData({
+  symbol: 'XBTUSD',
+  count: 100,
+});
+console.log(postTrade.result);
+```
+</CodeGroup>

@@ -1,7 +1,7 @@
 ---
-title: "SpotClient: Kraken Spot REST API Methods"
+title: "Kraken SpotClient: REST API Methods and Usage Guide"
 sidebarTitle: "Spot Client"
-description: "SpotClient covers all Kraken Spot REST endpoints — market data, account state, order management, staking/earn, deposits, and withdrawals — with full TypeScript types."
+description: "SpotClient covers all Kraken Spot REST endpoints: market data, account state, order management, earn, deposits, and withdrawals, with TypeScript types."
 ---
 
 `SpotClient` is the primary client for interacting with the [Kraken Spot REST API](https://docs.kraken.com/api/docs/guides/spot-rest-intro/). It covers market data (tickers, order books, candles, spreads), full account state (balances, open orders, positions, ledgers), order lifecycle (submit, amend, cancel, batch), the Earn/staking subsystem, and all deposit and withdrawal operations. All requests are routed to the base URL `https://api.kraken.com`.
@@ -44,7 +44,7 @@ const client = new SpotClient({
 
     | Method | Description |
     |---|---|
-    | `getServerTime()` | Returns the current server time as Unix timestamp and RFC 1123 string. |
+    | `getServerTime()` | Returns the current server time as a Unix timestamp and RFC 1123 string. |
     | `getSystemStatus()` | Returns the current system status and trading mode (`online`, `cancel_only`, `post_only`, `limit_only`, `maintenance`). |
     | `getAssetInfo(params?)` | Returns information about available assets — decimals, display decimals, status, and collateral value. |
     | `getAssetPairs(params?)` | Returns specifications for tradeable asset pairs — tick size, order minimums, available leverage, and fee tiers. |

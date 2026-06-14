@@ -61,7 +61,7 @@ const client = new DerivativesClient({
   apiSecret: process.env.API_FUTURES_SECRET!,
 });
 
-const accounts = await client.getAccountsDetails();
+const accounts = await client.getAccounts();
 console.log('Futures account details:', accounts);
 ```
 
@@ -78,7 +78,7 @@ const client = new DerivativesClient({
   testnet: true, // routes requests to https://demo-futures.kraken.com
 });
 
-const accounts = await client.getAccountsDetails();
+const accounts = await client.getAccounts();
 console.log('Demo account details:', accounts);
 ```
 
@@ -194,10 +194,12 @@ The following options are accepted by `SpotClient`, `DerivativesClient`, `Instit
 |---|---|---|
 | `apiKey` | `string` | Your Kraken API key |
 | `apiSecret` | `string` | Your Kraken API secret |
+| `apiAccessToken` | `string` | Use a pre-obtained access token instead of HMAC signing. When provided, the SDK skips signature generation and uses the token directly. |
 | `testnet` | `boolean` | Route requests to Kraken's demo environment. Currently only supported by `DerivativesClient`. |
 | `baseUrl` | `string` | Override the API base URL entirely (e.g. for proxying) |
 | `strictParamValidation` | `boolean` | If `true`, throws an error when any request parameter is `undefined`. Default: `false`. |
 | `parseExceptions` | `boolean` | Whether to post-process and re-throw request exceptions. Default: `true`. |
 | `keepAlive` | `boolean` | Enable HTTP keep-alive for REST requests via axios. |
 | `keepAliveMsecs` | `number` | Interval (ms) for TCP keep-alive packets when `keepAlive` is `true`. Default: `1000`. |
-| `customSignMessageFn` | `function` | Provide a custom HMAC signing function (e.g. Node's `createHmac` for better performance). |
+| `customTimestampFn` | `() => number` | Override the timestamp function used when generating request signatures. Returns a Unix timestamp in milliseconds. |
+| `customSignMessageFn` | `(message: string, secret: string) => Promise<string>` | Provide a custom HMAC signing function (e.g. Node's `createHmac` for better performance). |

@@ -1,7 +1,7 @@
 ---
 title: "WebSocket API Spot Trading — WebsocketAPIClient Reference"
 sidebarTitle: "Spot Trading"
-description: "Complete reference for WebsocketAPIClient Spot trading methods: submit, amend, edit, cancel, batch, and cancel-all-after over persistent WebSocket connections."
+description: "Reference for WebsocketAPIClient Spot trading: submit, amend, edit, cancel, batch, and cancel-all-after orders over persistent WebSocket connections."
 ---
 
 The `WebsocketAPIClient` provides a REST-like interface for sending trading commands over persistent WebSocket connections. Rather than managing raw WebSocket frames yourself, each method returns a `Promise` that resolves when the exchange acknowledges your request — giving you the ergonomics of `async/await` while benefiting from the low-latency of a long-lived WebSocket connection. Internally, the client wraps the lower-level `WebsocketClient` and handles authentication token retrieval, caching, and injection automatically.
